@@ -44,12 +44,12 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import configs.rcan_config as config
 
-from models.rcan       import build_rcan
-from models.losses     import build_loss
-from data.dataset      import build_dataset
-from utils.metrics     import compute_metrics, AverageMeter
-from utils.checkpoint  import save_checkpoint, load_checkpoint, BestCheckpointTracker
-from utils.logger      import TrainingLogger
+from models.rcan import build_rcan
+from models.losses import build_loss
+from data.dataset import build_dataset
+from utils.metrics import compute_metrics, AverageMeter
+from utils.checkpoint import save_checkpoint, load_checkpoint, BestCheckpointTracker
+from utils.logger import TrainingLogger
 
 
 # ---------------------------------------------------------------------------
@@ -65,20 +65,20 @@ def set_seed(seed: int):
         torch.cuda.manual_seed_all(seed)
     # Deterministic ops (may slow training slightly)
     torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark     = False
+    torch.backends.cudnn.benchmark = False
 
 
 # ---------------------------------------------------------------------------
 # Training step (one epoch)
 # ---------------------------------------------------------------------------
 def train_one_epoch(
-    model:      nn.Module,
+    model: nn.Module,
     dataloader: DataLoader,
-    optimizer:  torch.optim.Optimizer,
+    optimizer: torch.optim.Optimizer,
     loss_fn,
-    device:     torch.device,
-    epoch:      int,
-    logger:     TrainingLogger,
+    device: torch.device,
+    epoch: int,
+    logger: TrainingLogger,
 ) -> dict:
     """
     Run one full training epoch.
@@ -108,7 +108,7 @@ def train_one_epoch(
     model.train()
 
     loss_meter = AverageMeter("Loss")
-    n_batches  = len(dataloader)
+    n_batches = len(dataloader)
 
     for batch_idx, (lr, hr) in enumerate(dataloader):
         lr = lr.to(device, non_blocking=True)
@@ -148,11 +148,11 @@ def train_one_epoch(
 # ---------------------------------------------------------------------------
 @torch.no_grad()
 def validate(
-    model:      nn.Module,
+    model: nn.Module,
     dataloader: DataLoader,
     loss_fn,
-    device:     torch.device,
-    scale:      int,
+    device: torch.device,
+    scale: int,
 ) -> tuple:
     """
     Run validation: compute average PSNR, SSIM, and loss over the val set.
@@ -212,9 +212,9 @@ def train():
 
     # Device selection
     device = torch.device(
-        "cuda" if torch.cuda.is_available() else
-        "mps"  if torch.backends.mps.is_available() else
-        "cpu"
+        "cuda"
+        if torch.cuda.is_available()
+        else "mps" if torch.backends.mps.is_available() else "cpu"
     )
     print(f"\n{'='*60}")
     print(f"RCAN Training — Phase 1 (Microscope)")
@@ -230,34 +230,35 @@ def train():
     # Create output directories
     # -------------------------------------------------------------------------
     os.makedirs(config.CHECKPOINT_DIR, exist_ok=True)
-    os.makedirs(config.LOG_DIR,        exist_ok=True)
-    os.makedirs(config.SAMPLE_DIR,     exist_ok=True)
+    os.makedirs(config.LOG_DIR, exist_ok=True)
+    os.makedirs(config.SAMPLE_DIR, exist_ok=True)
 
     # -------------------------------------------------------------------------
     # Datasets and DataLoaders
     # -------------------------------------------------------------------------
     print("\nLoading datasets...")
     train_dataset = build_dataset(config, split="train")
-    val_dataset   = build_dataset(config, split="val")
+    val_dataset = build_dataset(config, split="val")
 
     train_loader = DataLoader(
         train_dataset,
-        batch_size  = config.BATCH_SIZE,
-        shuffle     = True,
-        num_workers = config.NUM_WORKERS,
-        pin_memory  = config.PIN_MEMORY and device.type == "cuda",
-        drop_last   = True,    # Drop last batch if smaller than batch_size
+        batch_size=config.BATCH_SIZE,
+        shuffle=True,
+        num_workers=config.NUM_WORKERS,
+        pin_memory=config.PIN_MEMORY and device.type == "cuda",
+        drop_last=True,  # Drop last batch if smaller than batch_size
     )
     val_loader = DataLoader(
         val_dataset,
-        batch_size  = 1,       # Val one image at a time for precise metrics
-        shuffle     = False,
-        num_workers = config.NUM_WORKERS,
-        pin_memory  = False,
+        batch_size=1,  # Val one image at a time for precise metrics
+        shuffle=False,
+        num_workers=config.NUM_WORKERS,
+        pin_memory=False,
     )
 
-    print(f"  Train: {len(train_dataset)} samples, "
-          f"{len(train_loader)} batches/epoch")
+    print(
+        f"  Train: {len(train_dataset)} samples, " f"{len(train_loader)} batches/epoch"
+    )
     print(f"  Val  : {len(val_dataset)} samples")
 
     # -------------------------------------------------------------------------
@@ -267,8 +268,10 @@ def train():
     model = build_rcan(config).to(device)
     n_params = model.count_parameters()
     print(f"  Parameters: {n_params:,}")
-    print(f"  Architecture: {config.N_RESGROUPS} groups × "
-          f"{config.N_RESBLOCKS} RCAB blocks × {config.N_FEATS} channels")
+    print(
+        f"  Architecture: {config.N_RESGROUPS} groups × "
+        f"{config.N_RESBLOCKS} RCAB blocks × {config.N_FEATS} channels"
+    )
 
     # -------------------------------------------------------------------------
     # Loss, Optimizer, Scheduler
@@ -278,16 +281,16 @@ def train():
     # Adam is the standard optimizer for SR. Betas and LR from the paper.
     optimizer = torch.optim.Adam(
         model.parameters(),
-        lr    = config.LEARNING_RATE,
-        betas = (config.ADAM_BETA1, config.ADAM_BETA2),
+        lr=config.LEARNING_RATE,
+        betas=(config.ADAM_BETA1, config.ADAM_BETA2),
     )
 
     # StepLR: halve the learning rate every LR_DECAY_STEP epochs.
     # This is exactly the paper's schedule (LR halved every 200 epochs).
     scheduler = torch.optim.lr_scheduler.StepLR(
         optimizer,
-        step_size = config.LR_DECAY_STEP,
-        gamma     = config.LR_DECAY_GAMMA,
+        step_size=config.LR_DECAY_STEP,
+        gamma=config.LR_DECAY_GAMMA,
     )
 
     # -------------------------------------------------------------------------
@@ -297,7 +300,7 @@ def train():
     resume_path = getattr(config, "RESUME_CHECKPOINT", None)
     if resume_path and os.path.exists(resume_path):
         print(f"\nResuming from: {resume_path}")
-        ckpt       = load_checkpoint(resume_path, model, optimizer, str(device))
+        ckpt = load_checkpoint(resume_path, model, optimizer, str(device))
         start_epoch = ckpt.get("epoch", 0) + 1
         # Advance scheduler to match resumed epoch
         for _ in range(start_epoch - 1):
@@ -306,8 +309,8 @@ def train():
     # -------------------------------------------------------------------------
     # Logging and checkpoint tracking
     # -------------------------------------------------------------------------
-    logger   = TrainingLogger(config.LOG_DIR)
-    tracker  = BestCheckpointTracker(config.CHECKPOINT_DIR, config.MAX_KEEP_CHECKPOINTS)
+    logger = TrainingLogger(config.LOG_DIR)
+    tracker = BestCheckpointTracker(config.CHECKPOINT_DIR, config.MAX_KEEP_CHECKPOINTS)
 
     # -------------------------------------------------------------------------
     # Training Loop
@@ -345,11 +348,13 @@ def train():
             if epoch % config.SAVE_EVERY == 0 or epoch == config.NUM_EPOCHS:
                 ckpt_filename = f"checkpoint_epoch{epoch:04d}_psnr{val_psnr:.2f}.pth"
                 ckpt_path = save_checkpoint(
-                    model, optimizer, epoch,
-                    metrics    = {"psnr": val_psnr, "ssim": val_ssim},
-                    checkpoint_dir = config.CHECKPOINT_DIR,
-                    filename   = ckpt_filename,
-                    is_best    = tracker.update(val_psnr, ckpt_filename),
+                    model,
+                    optimizer,
+                    epoch,
+                    metrics={"psnr": val_psnr, "ssim": val_ssim},
+                    checkpoint_dir=config.CHECKPOINT_DIR,
+                    filename=ckpt_filename,
+                    is_best=tracker.update(val_psnr, ckpt_filename),
                 )
 
         print()  # blank line between epochs
@@ -357,15 +362,17 @@ def train():
     # -------------------------------------------------------------------------
     # Final summary
     # -------------------------------------------------------------------------
-    logger.save_summary({
-        "dataset":    config.DATASET_NAME,
-        "scale":      config.SCALE_FACTOR,
-        "n_resgroups": config.N_RESGROUPS,
-        "n_resblocks": config.N_RESBLOCKS,
-        "n_feats":    config.N_FEATS,
-        "epochs":     config.NUM_EPOCHS,
-        "batch_size": config.BATCH_SIZE,
-    })
+    logger.save_summary(
+        {
+            "dataset": config.DATASET_NAME,
+            "scale": config.SCALE_FACTOR,
+            "n_resgroups": config.N_RESGROUPS,
+            "n_resblocks": config.N_RESBLOCKS,
+            "n_feats": config.N_FEATS,
+            "epochs": config.NUM_EPOCHS,
+            "batch_size": config.BATCH_SIZE,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -375,16 +382,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train RCAN for image SR")
     parser.add_argument(
         "--config",
-        type    = str,
-        default = None,
-        help    = "Optional path to a custom config .py file. "
-                  "Defaults to configs/rcan_config.py"
+        type=str,
+        default=None,
+        help="Optional path to a custom config .py file. "
+        "Defaults to configs/rcan_config.py",
     )
     args = parser.parse_args()
 
     if args.config:
         # Load a custom config module if provided
-        spec   = importlib.util.spec_from_file_location("custom_config", args.config)
+        spec = importlib.util.spec_from_file_location("custom_config", args.config)
         config = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(config)
         print(f"Using custom config: {args.config}")

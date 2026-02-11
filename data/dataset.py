@@ -72,20 +72,20 @@ class BSD500SRDataset(Dataset):
 
     def __init__(
         self,
-        root:              str,
-        split:             str   = "train",
-        scale:             int   = 2,
-        lr_patch_size:     int   = 48,
+        root: str,
+        split: str = "train",
+        scale: int = 2,
+        lr_patch_size: int = 48,
         noise_sigma_range: Tuple[float, float] = (0, 50),
-        augment:           bool  = True,
+        augment: bool = True,
     ):
         super().__init__()
-        self.scale             = scale
-        self.lr_patch_size     = lr_patch_size
-        self.hr_patch_size     = lr_patch_size * scale
+        self.scale = scale
+        self.lr_patch_size = lr_patch_size
+        self.hr_patch_size = lr_patch_size * scale
         self.noise_sigma_range = noise_sigma_range
-        self.augment           = augment
-        self.split             = split
+        self.augment = augment
+        self.split = split
 
         # Load BSD500 via torchvision — downloads automatically if needed
         self.image_paths = self._load_bsd500_paths(root, split)
@@ -96,11 +96,13 @@ class BSD500SRDataset(Dataset):
                 f"Check that torchvision downloaded correctly to: {root}"
             )
 
-        print(f"[BSD500SRDataset] split={split} | "
-              f"{len(self.image_paths)} images | "
-              f"LR patch: {lr_patch_size}×{lr_patch_size} → "
-              f"HR patch: {self.hr_patch_size}×{self.hr_patch_size} | "
-              f"scale: ×{scale}")
+        print(
+            f"[BSD500SRDataset] split={split} | "
+            f"{len(self.image_paths)} images | "
+            f"LR patch: {lr_patch_size}×{lr_patch_size} → "
+            f"HR patch: {self.hr_patch_size}×{self.hr_patch_size} | "
+            f"scale: ×{scale}"
+        )
 
     def _load_bsd500_paths(self, root: str, split: str) -> List[str]:
         """
@@ -117,6 +119,7 @@ class BSD500SRDataset(Dataset):
         # Try to use torchvision's built-in dataset loaders
         try:
             from torchvision.datasets import SBDataset
+
             # SBDataset is the standard torchvision wrapper for BSD500
             # image_set: 'train' (300 images) | 'val' (200 images) | 'test' (200 images)
             ts = split if split in ("train", "val") else "val"
@@ -132,23 +135,24 @@ class BSD500SRDataset(Dataset):
         root_path = Path(root)
         if root_path.exists():
             all_paths = [
-                str(p) for p in root_path.rglob("*")
-                if p.suffix.lower() in extensions
+                str(p) for p in root_path.rglob("*") if p.suffix.lower() in extensions
             ]
             if all_paths:
                 # Simple train/val split by index
                 n_total = len(all_paths)
                 if split == "train":
-                    return all_paths[:int(n_total * 0.8)]
+                    return all_paths[: int(n_total * 0.8)]
                 elif split == "val":
-                    return all_paths[int(n_total * 0.8):]
+                    return all_paths[int(n_total * 0.8) :]
                 else:
                     return all_paths
 
         # Ultimate fallback: generate a small synthetic dataset so the code
         # runs and can be verified even without network access.
-        print(f"[BSD500SRDataset] WARNING: Could not download BSD500. "
-              f"Using {50 if split=='train' else 10} synthetic images for testing.")
+        print(
+            f"[BSD500SRDataset] WARNING: Could not download BSD500. "
+            f"Using {50 if split=='train' else 10} synthetic images for testing."
+        )
         return self._generate_synthetic_paths(root, n=50 if split == "train" else 10)
 
     def _generate_synthetic_paths(self, root: str, n: int = 50) -> List[str]:
@@ -174,8 +178,8 @@ class BSD500SRDataset(Dataset):
                 for c in range(3):
                     base = rng.randint(50, 200)
                     img[:, :, c] = (
-                        np.linspace(base, 255 - base, 256).reshape(1, -1) *
-                        np.ones((256, 1))
+                        np.linspace(base, 255 - base, 256).reshape(1, -1)
+                        * np.ones((256, 1))
                     ).astype(np.uint8)
                 # Add some edges (rectangles) for the model to learn from
                 for _ in range(rng.randint(3, 8)):
@@ -259,7 +263,7 @@ class BSD500SRDataset(Dataset):
         hr_tensor : (3, HR_H, HR_W) float32 tensor, values in [0,1]
         """
         # HR → numpy float [0, 1]
-        hr_np = np.array(hr_patch, dtype=np.float32) / 255.0   # (H, W, 3)
+        hr_np = np.array(hr_patch, dtype=np.float32) / 255.0  # (H, W, 3)
 
         # 1. Add Gaussian noise to HR (sigma from range, applied in [0,255] scale)
         sigma = random.uniform(*self.noise_sigma_range) / 255.0
@@ -276,7 +280,7 @@ class BSD500SRDataset(Dataset):
 
         # 3. Convert to tensors (C, H, W), values in [0, 1]
         to_tensor = transforms.ToTensor()
-        lr_tensor = to_tensor(lr_pil)    # (3, LR_H, LR_W)
+        lr_tensor = to_tensor(lr_pil)  # (3, LR_H, LR_W)
         hr_tensor = to_tensor(hr_patch)  # (3, HR_H, HR_W) — clean original
 
         return lr_tensor, hr_tensor
@@ -332,25 +336,25 @@ class DIV2KDataset(Dataset):
     # Image index ranges per split
     SPLIT_RANGES = {
         "train": (1, 800),
-        "val":   (801, 900),
+        "val": (801, 900),
     }
 
     def __init__(
         self,
-        root:              str,
-        split:             str   = "train",
-        scale:             int   = 2,
-        lr_patch_size:     int   = 48,
+        root: str,
+        split: str = "train",
+        scale: int = 2,
+        lr_patch_size: int = 48,
         noise_sigma_range: Tuple[float, float] = (0, 50),
-        augment:           bool  = True,
+        augment: bool = True,
     ):
         super().__init__()
-        self.scale             = scale
-        self.lr_patch_size     = lr_patch_size
-        self.hr_patch_size     = lr_patch_size * scale
+        self.scale = scale
+        self.lr_patch_size = lr_patch_size
+        self.hr_patch_size = lr_patch_size * scale
         self.noise_sigma_range = noise_sigma_range
-        self.augment           = augment
-        self.split             = split
+        self.augment = augment
+        self.split = split
 
         self.hr_dir = Path(root) / f"DIV2K_{split}_HR"
         if not self.hr_dir.exists():
@@ -371,9 +375,11 @@ class DIV2KDataset(Dataset):
         if len(self.image_paths) == 0:
             raise RuntimeError(f"No DIV2K images found in: {self.hr_dir}")
 
-        print(f"[DIV2KDataset] split={split} | "
-              f"{len(self.image_paths)} images | "
-              f"scale: ×{scale}")
+        print(
+            f"[DIV2KDataset] split={split} | "
+            f"{len(self.image_paths)} images | "
+            f"scale: ×{scale}"
+        )
 
     def _random_crop(self, img: Image.Image) -> Image.Image:
         w, h = img.size
@@ -393,13 +399,15 @@ class DIV2KDataset(Dataset):
         return patch
 
     def _degrade(self, hr_patch: Image.Image) -> Tuple[torch.Tensor, torch.Tensor]:
-        hr_np   = np.array(hr_patch, dtype=np.float32) / 255.0
-        sigma   = random.uniform(*self.noise_sigma_range) / 255.0
+        hr_np = np.array(hr_patch, dtype=np.float32) / 255.0
+        sigma = random.uniform(*self.noise_sigma_range) / 255.0
         if sigma > 0:
-            noisy = np.clip(hr_np + np.random.randn(*hr_np.shape).astype(np.float32) * sigma, 0, 1)
+            noisy = np.clip(
+                hr_np + np.random.randn(*hr_np.shape).astype(np.float32) * sigma, 0, 1
+            )
         else:
             noisy = hr_np
-        lr_pil  = Image.fromarray((noisy * 255).astype(np.uint8)).resize(
+        lr_pil = Image.fromarray((noisy * 255).astype(np.uint8)).resize(
             (self.lr_patch_size, self.lr_patch_size), Image.BICUBIC
         )
         to_tensor = transforms.ToTensor()
@@ -433,26 +441,25 @@ def build_dataset(config, split: str = "train"):
     Dataset instance (BSD500SRDataset or DIV2KDataset)
     """
     common_kwargs = dict(
-        scale             = config.SCALE_FACTOR,
-        lr_patch_size     = config.LR_PATCH_SIZE,
-        noise_sigma_range = (config.NOISE_SIGMA_MIN, config.NOISE_SIGMA_MAX),
-        augment           = (split == "train"),
+        scale=config.SCALE_FACTOR,
+        lr_patch_size=config.LR_PATCH_SIZE,
+        noise_sigma_range=(config.NOISE_SIGMA_MIN, config.NOISE_SIGMA_MAX),
+        augment=(split == "train"),
     )
 
     if config.DATASET_NAME == "bsd500":
         return BSD500SRDataset(
-            root  = config.DATA_ROOT,
-            split = split,
+            root=config.DATA_ROOT,
+            split=split,
             **common_kwargs,
         )
     elif config.DATASET_NAME == "div2k":
         return DIV2KDataset(
-            root  = config.DATA_ROOT,
-            split = split,
+            root=config.DATA_ROOT,
+            split=split,
             **common_kwargs,
         )
     else:
         raise ValueError(
-            f"Unknown dataset: {config.DATASET_NAME}. "
-            f"Supported: 'bsd500', 'div2k'"
+            f"Unknown dataset: {config.DATASET_NAME}. " f"Supported: 'bsd500', 'div2k'"
         )

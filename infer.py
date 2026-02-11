@@ -31,9 +31,9 @@ from torchvision import transforms
 sys.path.insert(0, str(Path(__file__).parent))
 
 import configs.rcan_config as config
-from models.rcan      import build_rcan
+from models.rcan import build_rcan
 from utils.checkpoint import load_checkpoint
-from utils.metrics    import compute_metrics
+from utils.metrics import compute_metrics
 
 
 # ---------------------------------------------------------------------------
@@ -52,7 +52,7 @@ def load_image(path: str) -> torch.Tensor:
     tensor : (1, 3, H, W), values in [0, 1]
     """
     img = Image.open(path).convert("RGB")
-    return transforms.ToTensor()(img).unsqueeze(0)   # → (1, 3, H, W)
+    return transforms.ToTensor()(img).unsqueeze(0)  # → (1, 3, H, W)
 
 
 def save_image(tensor: torch.Tensor, path: str):
@@ -77,12 +77,12 @@ def save_image(tensor: torch.Tensor, path: str):
 # Tiled inference (for large images)
 # ---------------------------------------------------------------------------
 def infer_tiled(
-    model:     torch.nn.Module,
-    lr:        torch.Tensor,
-    scale:     int,
+    model: torch.nn.Module,
+    lr: torch.Tensor,
+    scale: int,
     tile_size: int = 256,
-    overlap:   int = 32,
-    device:    torch.device = torch.device("cpu"),
+    overlap: int = 32,
+    device: torch.device = torch.device("cpu"),
 ) -> torch.Tensor:
     """
     Run RCAN on large images by splitting into overlapping tiles.
@@ -158,12 +158,12 @@ def infer_tiled(
 # Main inference function
 # ---------------------------------------------------------------------------
 def infer(
-    input_path:      str,
+    input_path: str,
     checkpoint_path: str,
-    output_path:     Optional[str] = None,
-    hr_path:         Optional[str] = None,
-    use_tiling:      bool = False,
-    tile_size:       int  = 256,
+    output_path: Optional[str] = None,
+    hr_path: Optional[str] = None,
+    use_tiling: bool = False,
+    tile_size: int = 256,
 ):
     """
     Run RCAN on a single image.
@@ -177,9 +177,7 @@ def infer(
     use_tiling      : process in tiles (for large images)
     tile_size       : tile size in LR pixels (used only if use_tiling=True)
     """
-    device = torch.device(
-        "cuda" if torch.cuda.is_available() else "cpu"
-    )
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     print(f"\n{'='*60}")
     print(f"RCAN Single-Image Inference")
@@ -201,7 +199,9 @@ def infer(
     # -------------------------------------------------------------------------
     lr = load_image(input_path)
     _, _, H, W = lr.shape
-    print(f"LR size    : {W}×{H}  →  SR size: {W*config.SCALE_FACTOR}×{H*config.SCALE_FACTOR}")
+    print(
+        f"LR size    : {W}×{H}  →  SR size: {W*config.SCALE_FACTOR}×{H*config.SCALE_FACTOR}"
+    )
 
     # -------------------------------------------------------------------------
     # Run inference
@@ -221,8 +221,10 @@ def infer(
     # Save output
     # -------------------------------------------------------------------------
     if output_path is None:
-        stem       = Path(input_path).stem
-        output_path = str(Path(input_path).parent / f"{stem}_sr_x{config.SCALE_FACTOR}.png")
+        stem = Path(input_path).stem
+        output_path = str(
+            Path(input_path).parent / f"{stem}_sr_x{config.SCALE_FACTOR}.png"
+        )
 
     save_image(sr, output_path)
 
@@ -231,9 +233,10 @@ def infer(
     # -------------------------------------------------------------------------
     if hr_path:
         hr = load_image(hr_path).to(device)
-        assert sr.shape == hr.shape, \
-            f"SR shape {sr.shape} != HR shape {hr.shape}. " \
+        assert sr.shape == hr.shape, (
+            f"SR shape {sr.shape} != HR shape {hr.shape}. "
             f"Ensure HR is the correct scale."
+        )
         psnr, ssim = compute_metrics(sr, hr, scale=config.SCALE_FACTOR)
         print(f"\nMetrics vs. ground truth:")
         print(f"  PSNR : {psnr:.2f} dB")
@@ -248,19 +251,32 @@ def infer(
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="RCAN single-image inference")
-    parser.add_argument("--input",      required=True,  help="Path to LR input image")
-    parser.add_argument("--checkpoint", required=True,  help="Path to trained checkpoint (.pth)")
-    parser.add_argument("--output",     default=None,   help="Output SR image path (auto-named if omitted)")
-    parser.add_argument("--hr",         default=None,   help="Optional HR ground truth for metrics")
-    parser.add_argument("--tile",       action="store_true", help="Use tiled inference (for large images)")
-    parser.add_argument("--tile_size",  type=int, default=256, help="Tile size for tiled inference (default: 256)")
+    parser.add_argument("--input", required=True, help="Path to LR input image")
+    parser.add_argument(
+        "--checkpoint", required=True, help="Path to trained checkpoint (.pth)"
+    )
+    parser.add_argument(
+        "--output", default=None, help="Output SR image path (auto-named if omitted)"
+    )
+    parser.add_argument(
+        "--hr", default=None, help="Optional HR ground truth for metrics"
+    )
+    parser.add_argument(
+        "--tile", action="store_true", help="Use tiled inference (for large images)"
+    )
+    parser.add_argument(
+        "--tile_size",
+        type=int,
+        default=256,
+        help="Tile size for tiled inference (default: 256)",
+    )
 
     args = parser.parse_args()
     infer(
-        input_path      = args.input,
-        checkpoint_path = args.checkpoint,
-        output_path     = args.output,
-        hr_path         = args.hr,
-        use_tiling      = args.tile,
-        tile_size       = args.tile_size,
+        input_path=args.input,
+        checkpoint_path=args.checkpoint,
+        output_path=args.output,
+        hr_path=args.hr,
+        use_tiling=args.tile,
+        tile_size=args.tile_size,
     )

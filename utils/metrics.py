@@ -87,9 +87,9 @@ def crop_border(img: torch.Tensor, border: int) -> torch.Tensor:
 # PSNR
 # ---------------------------------------------------------------------------
 def compute_psnr(
-    sr:        torch.Tensor,
-    hr:        torch.Tensor,
-    max_val:   float = 1.0,
+    sr: torch.Tensor,
+    hr: torch.Tensor,
+    max_val: float = 1.0,
     crop_border: int = 0,
     y_channel: bool = True,
 ) -> float:
@@ -118,8 +118,9 @@ def compute_psnr(
     -------
     psnr : float (in dB)
     """
-    assert sr.shape == hr.shape, \
-        f"SR and HR shapes must match: {sr.shape} vs {hr.shape}"
+    assert (
+        sr.shape == hr.shape
+    ), f"SR and HR shapes must match: {sr.shape} vs {hr.shape}"
 
     if y_channel:
         sr = rgb_to_y(sr)
@@ -134,7 +135,7 @@ def compute_psnr(
     if mse == 0:
         return float("inf")
 
-    psnr = 10.0 * math.log10(max_val ** 2 / mse.item())
+    psnr = 10.0 * math.log10(max_val**2 / mse.item())
     return psnr
 
 
@@ -154,21 +155,21 @@ def _gaussian_kernel(size: int = 11, sigma: float = 1.5) -> torch.Tensor:
     Kernel is normalised to sum to 1.
     """
     coords = torch.arange(size, dtype=torch.float32) - size // 2
-    g = torch.exp(-(coords ** 2) / (2 * sigma ** 2))
+    g = torch.exp(-(coords**2) / (2 * sigma**2))
     g = g / g.sum()
     kernel = g.unsqueeze(1) @ g.unsqueeze(0)  # outer product → 2D
     return kernel
 
 
 def compute_ssim(
-    sr:          torch.Tensor,
-    hr:          torch.Tensor,
-    window_size: int   = 11,
-    sigma:       float = 1.5,
-    c1:          float = (0.01 ** 2),
-    c2:          float = (0.03 ** 2),
-    crop_border: int   = 0,
-    y_channel:   bool  = True,
+    sr: torch.Tensor,
+    hr: torch.Tensor,
+    window_size: int = 11,
+    sigma: float = 1.5,
+    c1: float = (0.01**2),
+    c2: float = (0.03**2),
+    crop_border: int = 0,
+    y_channel: bool = True,
 ) -> float:
     """
     Compute Structural Similarity Index Measure (SSIM).
@@ -199,8 +200,9 @@ def compute_ssim(
     -------
     ssim : float in [-1, 1]
     """
-    assert sr.shape == hr.shape, \
-        f"SR and HR shapes must match: {sr.shape} vs {hr.shape}"
+    assert (
+        sr.shape == hr.shape
+    ), f"SR and HR shapes must match: {sr.shape} vs {hr.shape}"
 
     if y_channel:
         sr = rgb_to_y(sr)
@@ -212,7 +214,7 @@ def compute_ssim(
 
     # Build Gaussian window: (1, 1, window_size, window_size)
     kernel_2d = _gaussian_kernel(window_size, sigma).to(sr.device)
-    kernel    = kernel_2d.unsqueeze(0).unsqueeze(0)  # (1, 1, W, W)
+    kernel = kernel_2d.unsqueeze(0).unsqueeze(0)  # (1, 1, W, W)
 
     # Ensure 4D: (B, C, H, W)
     if sr.dim() == 3:
@@ -229,20 +231,20 @@ def compute_ssim(
     pad = window_size // 2
 
     # Compute local statistics using Gaussian-weighted convolution
-    mu_x  = F.conv2d(sr, kernel_expanded, padding=pad, groups=channels)
-    mu_y  = F.conv2d(hr, kernel_expanded, padding=pad, groups=channels)
+    mu_x = F.conv2d(sr, kernel_expanded, padding=pad, groups=channels)
+    mu_y = F.conv2d(hr, kernel_expanded, padding=pad, groups=channels)
 
-    mu_x2 = mu_x ** 2
-    mu_y2 = mu_y ** 2
+    mu_x2 = mu_x**2
+    mu_y2 = mu_y**2
     mu_xy = mu_x * mu_y
 
     # Variance and covariance
-    sigma_x2  = F.conv2d(sr * sr, kernel_expanded, padding=pad, groups=channels) - mu_x2
-    sigma_y2  = F.conv2d(hr * hr, kernel_expanded, padding=pad, groups=channels) - mu_y2
-    sigma_xy  = F.conv2d(sr * hr, kernel_expanded, padding=pad, groups=channels) - mu_xy
+    sigma_x2 = F.conv2d(sr * sr, kernel_expanded, padding=pad, groups=channels) - mu_x2
+    sigma_y2 = F.conv2d(hr * hr, kernel_expanded, padding=pad, groups=channels) - mu_y2
+    sigma_xy = F.conv2d(sr * hr, kernel_expanded, padding=pad, groups=channels) - mu_xy
 
     # SSIM formula
-    numerator   = (2 * mu_xy + c1) * (2 * sigma_xy + c2)
+    numerator = (2 * mu_xy + c1) * (2 * sigma_xy + c2)
     denominator = (mu_x2 + mu_y2 + c1) * (sigma_x2 + sigma_y2 + c2)
 
     ssim_map = numerator / denominator
@@ -253,10 +255,10 @@ def compute_ssim(
 # Convenience: compute both metrics at once
 # ---------------------------------------------------------------------------
 def compute_metrics(
-    sr:          torch.Tensor,
-    hr:          torch.Tensor,
-    scale:       int = 2,
-    y_channel:   bool = True,
+    sr: torch.Tensor,
+    hr: torch.Tensor,
+    scale: int = 2,
+    y_channel: bool = True,
 ) -> Tuple[float, float]:
     """
     Compute PSNR and SSIM with the standard SR evaluation protocol:
@@ -302,14 +304,14 @@ class AverageMeter:
 
     def __init__(self, name: str = "", fmt: str = ":f"):
         self.name = name
-        self.fmt  = fmt
+        self.fmt = fmt
         self.reset()
 
     def reset(self):
         """Reset all tracked values to zero."""
-        self.val   = 0.0
-        self.avg   = 0.0
-        self.sum   = 0.0
+        self.val = 0.0
+        self.avg = 0.0
+        self.sum = 0.0
         self.count = 0
 
     def update(self, val: float, n: int = 1):
@@ -321,10 +323,10 @@ class AverageMeter:
         val : new value (e.g., PSNR for this batch)
         n   : number of samples this value is averaged over (usually batch_size)
         """
-        self.val    = val
-        self.sum   += val * n
+        self.val = val
+        self.sum += val * n
         self.count += n
-        self.avg    = self.sum / self.count
+        self.avg = self.sum / self.count
 
     def __str__(self) -> str:
         fmtstr = f"{{name}} {{val{self.fmt}}} ({{avg{self.fmt}}})"

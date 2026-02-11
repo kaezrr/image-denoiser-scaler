@@ -32,8 +32,9 @@ import torch.nn.functional as F
 # ---------------------------------------------------------------------------
 # Helper: default conv
 # ---------------------------------------------------------------------------
-def default_conv(in_channels: int, out_channels: int, kernel_size: int,
-                 bias: bool = True) -> nn.Conv2d:
+def default_conv(
+    in_channels: int, out_channels: int, kernel_size: int, bias: bool = True
+) -> nn.Conv2d:
     """
     Standard 2-D convolution with 'same' padding.
 
@@ -42,9 +43,7 @@ def default_conv(in_channels: int, out_channels: int, kernel_size: int,
     upsample step.
     """
     return nn.Conv2d(
-        in_channels, out_channels, kernel_size,
-        padding=kernel_size // 2,
-        bias=bias
+        in_channels, out_channels, kernel_size, padding=kernel_size // 2, bias=bias
     )
 
 
@@ -92,11 +91,11 @@ class ChannelAttention(nn.Module):
         # Using 1×1 convolutions because the tensor is already (B, C, 1, 1)
         # after GAP, making them exactly equivalent to fully-connected layers.
         self.channel_attention = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1),                           # Global Average Pooling
-            nn.Conv2d(n_feats, n_feats // reduction, 1),      # FC: compress
+            nn.AdaptiveAvgPool2d(1),  # Global Average Pooling
+            nn.Conv2d(n_feats, n_feats // reduction, 1),  # FC: compress
             nn.ReLU(inplace=True),
-            nn.Conv2d(n_feats // reduction, n_feats, 1),      # FC: expand
-            nn.Sigmoid()                                        # Attention weights ∈ [0,1]
+            nn.Conv2d(n_feats // reduction, n_feats, 1),  # FC: expand
+            nn.Sigmoid(),  # Attention weights ∈ [0,1]
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -141,7 +140,7 @@ class RCAB(nn.Module):
         kernel_size: int,
         reduction: int = 16,
         res_scale: float = 1.0,
-        act: nn.Module = nn.ReLU(inplace=True)
+        act: nn.Module = nn.ReLU(inplace=True),
     ):
         super().__init__()
         self.res_scale = res_scale
@@ -151,7 +150,7 @@ class RCAB(nn.Module):
             conv(n_feats, n_feats, kernel_size),  # First conv: preserve channel count
             act,
             conv(n_feats, n_feats, kernel_size),  # Second conv: preserve channel count
-            ChannelAttention(n_feats, reduction)  # CA re-weights channels
+            ChannelAttention(n_feats, reduction),  # CA re-weights channels
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -201,7 +200,7 @@ class ResidualGroup(nn.Module):
         kernel_size: int,
         reduction: int = 16,
         res_scale: float = 1.0,
-        act: nn.Module = nn.ReLU(inplace=True)
+        act: nn.Module = nn.ReLU(inplace=True),
     ):
         super().__init__()
 
@@ -250,11 +249,11 @@ class Upsampler(nn.Sequential):
             # For scale=4, loop runs twice (2 × PixelShuffle(2) = PixelShuffle(4))
             for _ in range(int(math.log(scale, 2))):
                 # Expand channels by scale^2, then reshuffle into spatial dims
-                modules.append(conv(n_feats, 4 * n_feats, 3))   # 4 = 2^2 for ×2
+                modules.append(conv(n_feats, 4 * n_feats, 3))  # 4 = 2^2 for ×2
                 modules.append(nn.PixelShuffle(2))
         elif scale == 3:
             # Special case: scale=3 is not a power of 2
-            modules.append(conv(n_feats, 9 * n_feats, 3))       # 9 = 3^2 for ×3
+            modules.append(conv(n_feats, 9 * n_feats, 3))  # 9 = 3^2 for ×3
             modules.append(nn.PixelShuffle(3))
         else:
             raise NotImplementedError(
@@ -306,19 +305,19 @@ class RCAN(nn.Module):
 
     def __init__(
         self,
-        n_resgroups:  int   = 10,
-        n_resblocks:  int   = 20,
-        n_feats:      int   = 64,
-        scale:        int   = 2,
-        reduction:    int   = 16,
-        res_scale:    float = 1.0,
-        in_channels:  int   = 3,
-        out_channels: int   = 3,
+        n_resgroups: int = 10,
+        n_resblocks: int = 20,
+        n_feats: int = 64,
+        scale: int = 2,
+        reduction: int = 16,
+        res_scale: float = 1.0,
+        in_channels: int = 3,
+        out_channels: int = 3,
     ):
         super().__init__()
 
         conv = default_conv
-        act  = nn.ReLU(inplace=True)
+        act = nn.ReLU(inplace=True)
 
         # ------------------------------------------------------------------
         # 1. Shallow Feature Extraction
@@ -337,8 +336,13 @@ class RCAN(nn.Module):
         # Default: 10 × 20 = 200 RCAB blocks (400+ convolution layers total!).
         resgroups = [
             ResidualGroup(
-                conv, n_resblocks, n_feats, kernel_size=3,
-                reduction=reduction, res_scale=res_scale, act=act
+                conv,
+                n_resblocks,
+                n_feats,
+                kernel_size=3,
+                reduction=reduction,
+                res_scale=res_scale,
+                act=act,
             )
             for _ in range(n_resgroups)
         ]
@@ -370,7 +374,7 @@ class RCAN(nn.Module):
         # Step 1: Shallow feature extraction
         # x_head carries the first-level features and acts as the long skip
         # connection all the way through the RIR body.
-        x_head = self.head(x)   # (B, n_feats, H, W)
+        x_head = self.head(x)  # (B, n_feats, H, W)
 
         # Step 2: Deep feature extraction with long skip
         # body(x_head): residual features (what the deep network learned)
@@ -378,10 +382,10 @@ class RCAN(nn.Module):
         x_body = self.body(x_head) + x_head  # (B, n_feats, H, W)
 
         # Step 3: Sub-pixel upsampling
-        x_up = self.upsample(x_body)         # (B, n_feats, H*scale, W*scale)
+        x_up = self.upsample(x_body)  # (B, n_feats, H*scale, W*scale)
 
         # Step 4: Final reconstruction to RGB
-        out = self.tail(x_up)                 # (B, 3, H*scale, W*scale)
+        out = self.tail(x_up)  # (B, 3, H*scale, W*scale)
 
         return out
 
@@ -408,12 +412,12 @@ def build_rcan(config) -> RCAN:
              N_RESGROUPS, N_RESBLOCKS, N_FEATS, SCALE_FACTOR, REDUCTION, RES_SCALE
     """
     model = RCAN(
-        n_resgroups = config.N_RESGROUPS,
-        n_resblocks = config.N_RESBLOCKS,
-        n_feats     = config.N_FEATS,
-        scale       = config.SCALE_FACTOR,
-        reduction   = config.REDUCTION,
-        res_scale   = config.RES_SCALE,
+        n_resgroups=config.N_RESGROUPS,
+        n_resblocks=config.N_RESBLOCKS,
+        n_feats=config.N_FEATS,
+        scale=config.SCALE_FACTOR,
+        reduction=config.REDUCTION,
+        res_scale=config.RES_SCALE,
     )
     return model
 
@@ -430,9 +434,9 @@ if __name__ == "__main__":
 
     # Small model for quick testing
     model = RCAN(
-        n_resgroups=2,   # Reduced for quick test (paper: 10)
-        n_resblocks=4,   # Reduced for quick test (paper: 20)
-        n_feats=32,      # Reduced for quick test (paper: 64)
+        n_resgroups=2,  # Reduced for quick test (paper: 10)
+        n_resblocks=4,  # Reduced for quick test (paper: 20)
+        n_feats=32,  # Reduced for quick test (paper: 64)
         scale=2,
         reduction=8,
     )
@@ -457,8 +461,12 @@ if __name__ == "__main__":
     print(f"Output shape : {tuple(out.shape)}")
     expected_h = lr_h * 2
     expected_w = lr_w * 2
-    assert out.shape == (batch_size, 3, expected_h, expected_w), \
-        f"Shape mismatch! Expected {(batch_size, 3, expected_h, expected_w)}, got {tuple(out.shape)}"
+    assert out.shape == (
+        batch_size,
+        3,
+        expected_h,
+        expected_w,
+    ), f"Shape mismatch! Expected {(batch_size, 3, expected_h, expected_w)}, got {tuple(out.shape)}"
 
     print("\n✓ Forward pass correct.")
     print("✓ Output dimensions match scale factor ×2.")

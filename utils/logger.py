@@ -34,24 +34,24 @@ class TrainingLogger:
 
     # Column names for CSV files
     TRAIN_COLUMNS = ["epoch", "loss_total", "loss_l1", "lr", "epoch_time_s"]
-    VAL_COLUMNS   = ["epoch", "psnr", "ssim", "loss_total"]
+    VAL_COLUMNS = ["epoch", "psnr", "ssim", "loss_total"]
 
     def __init__(self, log_dir: str, experiment: str = "rcan_training"):
-        self.log_dir    = log_dir
+        self.log_dir = log_dir
         self.experiment = experiment
         self.start_time = time.time()
 
         os.makedirs(log_dir, exist_ok=True)
 
         self.train_csv_path = os.path.join(log_dir, "train_log.csv")
-        self.val_csv_path   = os.path.join(log_dir, "val_log.csv")
-        self.summary_path   = os.path.join(log_dir, "summary.json")
+        self.val_csv_path = os.path.join(log_dir, "val_log.csv")
+        self.summary_path = os.path.join(log_dir, "summary.json")
 
         self._init_csv(self.train_csv_path, self.TRAIN_COLUMNS)
-        self._init_csv(self.val_csv_path,   self.VAL_COLUMNS)
+        self._init_csv(self.val_csv_path, self.VAL_COLUMNS)
 
-        self.best_psnr   = 0.0
-        self.best_epoch  = 0
+        self.best_psnr = 0.0
+        self.best_epoch = 0
         self.epoch_count = 0
 
     def _init_csv(self, path: str, columns: list):
@@ -63,10 +63,10 @@ class TrainingLogger:
 
     def log_train(
         self,
-        epoch:       int,
-        loss_dict:   Dict[str, float],
-        lr:          float,
-        epoch_time:  float,
+        epoch: int,
+        loss_dict: Dict[str, float],
+        lr: float,
+        epoch_time: float,
     ):
         """
         Log training metrics for one epoch.
@@ -79,10 +79,10 @@ class TrainingLogger:
         epoch_time : time taken for this epoch in seconds
         """
         row = {
-            "epoch":        epoch,
-            "loss_total":   f"{loss_dict.get('total', 0):.6f}",
-            "loss_l1":      f"{loss_dict.get('l1', 0):.6f}",
-            "lr":           f"{lr:.2e}",
+            "epoch": epoch,
+            "loss_total": f"{loss_dict.get('total', 0):.6f}",
+            "loss_l1": f"{loss_dict.get('l1', 0):.6f}",
+            "lr": f"{lr:.2e}",
             "epoch_time_s": f"{epoch_time:.1f}",
         }
         with open(self.train_csv_path, "a", newline="") as f:
@@ -99,9 +99,9 @@ class TrainingLogger:
 
     def log_val(
         self,
-        epoch:     int,
-        psnr:      float,
-        ssim:      float,
+        epoch: int,
+        psnr: float,
+        ssim: float,
         loss_dict: Dict[str, float],
     ):
         """
@@ -116,13 +116,13 @@ class TrainingLogger:
         """
         is_best = psnr > self.best_psnr
         if is_best:
-            self.best_psnr  = psnr
+            self.best_psnr = psnr
             self.best_epoch = epoch
 
         row = {
-            "epoch":      epoch,
-            "psnr":       f"{psnr:.4f}",
-            "ssim":       f"{ssim:.6f}",
+            "epoch": epoch,
+            "psnr": f"{psnr:.4f}",
+            "ssim": f"{ssim:.6f}",
             "loss_total": f"{loss_dict.get('total', 0):.6f}",
         }
         with open(self.val_csv_path, "a", newline="") as f:
@@ -146,12 +146,12 @@ class TrainingLogger:
         """
         total_time = time.time() - self.start_time
         summary = {
-            "experiment":     self.experiment,
-            "completed_at":   datetime.now().isoformat(),
+            "experiment": self.experiment,
+            "completed_at": datetime.now().isoformat(),
             "total_time_min": round(total_time / 60, 2),
-            "best_psnr_db":   round(self.best_psnr, 4),
-            "best_epoch":     self.best_epoch,
-            "log_dir":        self.log_dir,
+            "best_psnr_db": round(self.best_psnr, 4),
+            "best_epoch": self.best_epoch,
+            "log_dir": self.log_dir,
         }
         if config_dict:
             summary["config"] = config_dict

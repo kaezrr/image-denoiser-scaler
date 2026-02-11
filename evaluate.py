@@ -29,9 +29,9 @@ from torch.utils.data import DataLoader
 sys.path.insert(0, str(Path(__file__).parent))
 
 import configs.rcan_config as config
-from models.rcan      import build_rcan
-from data.dataset     import build_dataset
-from utils.metrics    import compute_metrics, AverageMeter
+from models.rcan import build_rcan
+from data.dataset import build_dataset
+from utils.metrics import compute_metrics, AverageMeter
 from utils.checkpoint import load_checkpoint
 
 
@@ -56,9 +56,9 @@ def bicubic_upsample(lr: torch.Tensor, scale: int) -> torch.Tensor:
     """
     return torch.nn.functional.interpolate(
         lr,
-        scale_factor  = scale,
-        mode          = "bicubic",
-        align_corners = False,
+        scale_factor=scale,
+        mode="bicubic",
+        align_corners=False,
     )
 
 
@@ -66,13 +66,13 @@ def bicubic_upsample(lr: torch.Tensor, scale: int) -> torch.Tensor:
 # Save visual comparison grid
 # ---------------------------------------------------------------------------
 def save_comparison(
-    lr:       torch.Tensor,
-    bicubic:  torch.Tensor,
-    sr:       torch.Tensor,
-    hr:       torch.Tensor,
+    lr: torch.Tensor,
+    bicubic: torch.Tensor,
+    sr: torch.Tensor,
+    hr: torch.Tensor,
     save_path: str,
-    psnr:     float,
-    ssim:     float,
+    psnr: float,
+    ssim: float,
 ):
     """
     Save a side-by-side comparison image: LR | Bicubic | RCAN | HR.
@@ -85,6 +85,7 @@ def save_comparison(
     save_path : where to save the PNG
     psnr, ssim : metrics for this image (shown in filename)
     """
+
     def to_pil(t: torch.Tensor) -> Image.Image:
         """Convert (3, H, W) tensor [0,1] to PIL Image."""
         arr = (t.clamp(0, 1) * 255).byte().permute(1, 2, 0).cpu().numpy()
@@ -97,17 +98,17 @@ def save_comparison(
         lr.unsqueeze(0), size=(h, w), mode="nearest"
     ).squeeze(0)
 
-    pil_lr      = to_pil(lr_up)
+    pil_lr = to_pil(lr_up)
     pil_bicubic = to_pil(bicubic)
-    pil_sr      = to_pil(sr)
-    pil_hr      = to_pil(hr)
+    pil_sr = to_pil(sr)
+    pil_hr = to_pil(hr)
 
     # Create horizontal strip: [LR | Bicubic | RCAN | HR]
     strip = Image.new("RGB", (w * 4, h))
-    strip.paste(pil_lr,      (0,       0))
-    strip.paste(pil_bicubic, (w,       0))
-    strip.paste(pil_sr,      (w * 2,   0))
-    strip.paste(pil_hr,      (w * 3,   0))
+    strip.paste(pil_lr, (0, 0))
+    strip.paste(pil_bicubic, (w, 0))
+    strip.paste(pil_sr, (w * 2, 0))
+    strip.paste(pil_hr, (w * 3, 0))
 
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     strip.save(save_path)
@@ -126,9 +127,7 @@ def evaluate(checkpoint_path: str, num_samples: int = 8):
     checkpoint_path : path to the .pth checkpoint file
     num_samples     : number of visual comparison images to save
     """
-    device = torch.device(
-        "cuda" if torch.cuda.is_available() else "cpu"
-    )
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     print(f"\n{'='*60}")
     print(f"RCAN Evaluation")
@@ -147,19 +146,19 @@ def evaluate(checkpoint_path: str, num_samples: int = 8):
     # Dataset
     # -------------------------------------------------------------------------
     val_dataset = build_dataset(config, split="val")
-    val_loader  = DataLoader(val_dataset, batch_size=1, shuffle=False)
+    val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
 
     print(f"Val images : {len(val_dataset)}")
 
     # -------------------------------------------------------------------------
     # Metrics
     # -------------------------------------------------------------------------
-    rcan_psnr_meter    = AverageMeter("RCAN PSNR")
-    rcan_ssim_meter    = AverageMeter("RCAN SSIM")
+    rcan_psnr_meter = AverageMeter("RCAN PSNR")
+    rcan_ssim_meter = AverageMeter("RCAN SSIM")
     bicubic_psnr_meter = AverageMeter("Bicubic PSNR")
     bicubic_ssim_meter = AverageMeter("Bicubic SSIM")
 
-    sample_dir   = os.path.join(config.SAMPLE_DIR, "eval_comparison")
+    sample_dir = os.path.join(config.SAMPLE_DIR, "eval_comparison")
     samples_saved = 0
 
     for idx, (lr, hr) in enumerate(val_loader):
@@ -167,16 +166,18 @@ def evaluate(checkpoint_path: str, num_samples: int = 8):
         hr = hr.to(device)
 
         # RCAN prediction
-        sr          = model(lr)
-        sr_clamped  = torch.clamp(sr, 0, 1)
+        sr = model(lr)
+        sr_clamped = torch.clamp(sr, 0, 1)
 
         # Bicubic baseline
-        bicubic     = bicubic_upsample(lr, config.SCALE_FACTOR)
+        bicubic = bicubic_upsample(lr, config.SCALE_FACTOR)
         bicubic_clamped = torch.clamp(bicubic, 0, 1)
 
         # Compute metrics for this image
-        psnr_rcan,    ssim_rcan    = compute_metrics(sr_clamped,      hr, config.SCALE_FACTOR)
-        psnr_bicubic, ssim_bicubic = compute_metrics(bicubic_clamped, hr, config.SCALE_FACTOR)
+        psnr_rcan, ssim_rcan = compute_metrics(sr_clamped, hr, config.SCALE_FACTOR)
+        psnr_bicubic, ssim_bicubic = compute_metrics(
+            bicubic_clamped, hr, config.SCALE_FACTOR
+        )
 
         rcan_psnr_meter.update(psnr_rcan)
         rcan_ssim_meter.update(ssim_rcan)
@@ -187,13 +188,16 @@ def evaluate(checkpoint_path: str, num_samples: int = 8):
         if samples_saved < num_samples:
             save_path = os.path.join(
                 sample_dir,
-                f"sample_{idx:04d}_psnr{psnr_rcan:.2f}_ssim{ssim_rcan:.4f}.png"
+                f"sample_{idx:04d}_psnr{psnr_rcan:.2f}_ssim{ssim_rcan:.4f}.png",
             )
             save_comparison(
-                lr=lr[0], bicubic=bicubic_clamped[0],
-                sr=sr_clamped[0], hr=hr[0],
+                lr=lr[0],
+                bicubic=bicubic_clamped[0],
+                sr=sr_clamped[0],
+                hr=hr[0],
                 save_path=save_path,
-                psnr=psnr_rcan, ssim=ssim_rcan,
+                psnr=psnr_rcan,
+                ssim=ssim_rcan,
             )
             samples_saved += 1
 
@@ -203,7 +207,9 @@ def evaluate(checkpoint_path: str, num_samples: int = 8):
     print(f"\n{'─'*60}")
     print(f"{'Method':<20} {'PSNR (dB)':>12} {'SSIM':>12}")
     print(f"{'─'*60}")
-    print(f"{'Bicubic':<20} {bicubic_psnr_meter.avg:>12.2f} {bicubic_ssim_meter.avg:>12.4f}")
+    print(
+        f"{'Bicubic':<20} {bicubic_psnr_meter.avg:>12.2f} {bicubic_ssim_meter.avg:>12.4f}"
+    )
     print(f"{'RCAN':<20} {rcan_psnr_meter.avg:>12.2f} {rcan_ssim_meter.avg:>12.4f}")
     print(f"{'─'*60}")
 
@@ -216,8 +222,8 @@ def evaluate(checkpoint_path: str, num_samples: int = 8):
     print("(Each image shows: LR → Bicubic → RCAN → HR ground truth)")
 
     return {
-        "rcan_psnr":    rcan_psnr_meter.avg,
-        "rcan_ssim":    rcan_ssim_meter.avg,
+        "rcan_psnr": rcan_psnr_meter.avg,
+        "rcan_ssim": rcan_ssim_meter.avg,
         "bicubic_psnr": bicubic_psnr_meter.avg,
         "bicubic_ssim": bicubic_ssim_meter.avg,
     }
@@ -230,15 +236,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate RCAN checkpoint")
     parser.add_argument(
         "--checkpoint",
-        type     = str,
-        required = True,
-        help     = "Path to the trained model checkpoint (.pth)"
+        type=str,
+        required=True,
+        help="Path to the trained model checkpoint (.pth)",
     )
     parser.add_argument(
         "--num_samples",
-        type    = int,
-        default = 8,
-        help    = "Number of visual comparison images to save (default: 8)"
+        type=int,
+        default=8,
+        help="Number of visual comparison images to save (default: 8)",
     )
     args = parser.parse_args()
 

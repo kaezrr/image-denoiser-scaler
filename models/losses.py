@@ -81,10 +81,11 @@ class PerceptualLoss(nn.Module):
 
         try:
             import torchvision.models as models
+
             vgg = models.vgg19(weights=models.VGG19_Weights.DEFAULT)
             # Extract only the layers up to feature_layer
             self.feature_extractor = nn.Sequential(
-                *list(vgg.features)[:feature_layer + 1]
+                *list(vgg.features)[: feature_layer + 1]
             )
         except ImportError:
             raise ImportError(
@@ -99,12 +100,10 @@ class PerceptualLoss(nn.Module):
         # ImageNet normalisation constants (VGG was trained on these)
         # Shape: (1, 3, 1, 1) for broadcasting
         self.register_buffer(
-            "mean",
-            torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+            "mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
         )
         self.register_buffer(
-            "std",
-            torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+            "std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
         )
 
     def _normalize(self, x: torch.Tensor) -> torch.Tensor:
@@ -139,11 +138,11 @@ class CombinedLoss(nn.Module):
 
     def __init__(
         self,
-        l1_weight:         float = 1.0,
+        l1_weight: float = 1.0,
         perceptual_weight: float = 0.0,
     ):
         super().__init__()
-        self.l1_weight         = l1_weight
+        self.l1_weight = l1_weight
         self.perceptual_weight = perceptual_weight
 
         self.l1_loss = L1Loss()
@@ -153,11 +152,7 @@ class CombinedLoss(nn.Module):
         else:
             self.perceptual_loss = None
 
-    def forward(
-        self,
-        sr: torch.Tensor,
-        hr: torch.Tensor
-    ) -> tuple[torch.Tensor, dict]:
+    def forward(self, sr: torch.Tensor, hr: torch.Tensor) -> tuple[torch.Tensor, dict]:
         """
         Returns
         -------

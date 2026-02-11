@@ -20,13 +20,13 @@ import torch.nn as nn
 
 
 def save_checkpoint(
-    model:          nn.Module,
-    optimizer:      torch.optim.Optimizer,
-    epoch:          int,
-    metrics:        Dict[str, float],
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    epoch: int,
+    metrics: Dict[str, float],
     checkpoint_dir: str,
-    filename:       str = "checkpoint.pth",
-    is_best:        bool = False,
+    filename: str = "checkpoint.pth",
+    is_best: bool = False,
 ) -> str:
     """
     Save a training checkpoint to disk.
@@ -55,10 +55,10 @@ def save_checkpoint(
     os.makedirs(checkpoint_dir, exist_ok=True)
 
     state = {
-        "epoch":          epoch,
-        "model_state":    model.state_dict(),
+        "epoch": epoch,
+        "model_state": model.state_dict(),
         "optimizer_state": optimizer.state_dict(),
-        "metrics":        metrics,
+        "metrics": metrics,
     }
 
     path = os.path.join(checkpoint_dir, filename)
@@ -67,16 +67,18 @@ def save_checkpoint(
     if is_best:
         best_path = os.path.join(checkpoint_dir, "best_model.pth")
         shutil.copyfile(path, best_path)
-        print(f"  ✓ Best model saved → {best_path}  (PSNR: {metrics.get('psnr', 0):.2f} dB)")
+        print(
+            f"  ✓ Best model saved → {best_path}  (PSNR: {metrics.get('psnr', 0):.2f} dB)"
+        )
 
     return path
 
 
 def load_checkpoint(
     checkpoint_path: str,
-    model:           nn.Module,
-    optimizer:       Optional[torch.optim.Optimizer] = None,
-    device:          str = "cpu",
+    model: nn.Module,
+    optimizer: Optional[torch.optim.Optimizer] = None,
+    device: str = "cpu",
 ) -> Dict[str, Any]:
     """
     Load a checkpoint from disk.
@@ -102,13 +104,15 @@ def load_checkpoint(
     if optimizer is not None and "optimizer_state" in checkpoint:
         optimizer.load_state_dict(checkpoint["optimizer_state"])
 
-    epoch   = checkpoint.get("epoch", 0)
+    epoch = checkpoint.get("epoch", 0)
     metrics = checkpoint.get("metrics", {})
 
     print(f"  ✓ Checkpoint loaded from: {checkpoint_path}")
-    print(f"    Epoch: {epoch} | "
-          f"PSNR: {metrics.get('psnr', 'N/A'):.2f} dB | "
-          f"SSIM: {metrics.get('ssim', 'N/A'):.4f}")
+    print(
+        f"    Epoch: {epoch} | "
+        f"PSNR: {metrics.get('psnr', 'N/A'):.2f} dB | "
+        f"SSIM: {metrics.get('ssim', 'N/A'):.4f}"
+    )
 
     return checkpoint
 
@@ -128,14 +132,14 @@ class BestCheckpointTracker:
     def __init__(
         self,
         checkpoint_dir: str,
-        max_keep:       int = 3,
-        metric:         str = "psnr",
+        max_keep: int = 3,
+        metric: str = "psnr",
     ):
         self.checkpoint_dir = checkpoint_dir
-        self.max_keep       = max_keep
-        self.metric         = metric
-        self.history: list  = []  # [(metric_value, filepath), ...]
-        self.best_value     = -float("inf")
+        self.max_keep = max_keep
+        self.metric = metric
+        self.history: list = []  # [(metric_value, filepath), ...]
+        self.best_value = -float("inf")
 
         os.makedirs(checkpoint_dir, exist_ok=True)
 
@@ -162,7 +166,7 @@ class BestCheckpointTracker:
 
         # Remove checkpoints beyond max_keep
         if len(self.history) > self.max_keep:
-            _, old_path = self.history.pop()   # Remove worst
+            _, old_path = self.history.pop()  # Remove worst
             if os.path.exists(old_path) and "best_model" not in old_path:
                 os.remove(old_path)
 
