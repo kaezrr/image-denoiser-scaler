@@ -1,0 +1,19 @@
+# requirements.txt — RCAN Image Super-Resolution Project
+# Install with: pip install -r requirements.txt
+
+# ── Core deep learning ────────────────────────────────────────────────────────
+torch>=2.0.0            # PyTorch — tested on 2.0+
+torchvision>=0.15.0     # Datasets (BSD500 auto-download), VGG19 for perceptual loss
+
+# ── Image processing ─────────────────────────────────────────────────────────
+Pillow>=9.0.0           # Image loading and saving
+numpy>=1.23.0           # Numerical operations
+
+# ── Training utilities ────────────────────────────────────────────────────────
+tqdm>=4.64.0            # Progress bars (optional but recommended)
+
+# ── Evaluation / visualisation ────────────────────────────────────────────────
+matplotlib>=3.5.0       # Plotting training curves from the CSV logs
+
+# ── Optional: faster data loading ─────────────────────────────────────────────
+# opencv-python>=4.7.0  # Faster image loading; replace PIL.open with cv2.imread
