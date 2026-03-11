@@ -102,5 +102,8 @@ def prepare_data():
     train_data = data[:2500].astype(np.float32) / 255.0
     test_data = data[3000:3500].astype(np.float32) / 255.0
 
+    # Free the large uint8 array as soon as possible
+    del data
+
     print(f"[dataset] train_data shape: {train_data.shape}, test_data shape: {test_data.shape}")
     return train_data, test_data

@@ -24,7 +24,7 @@ import numpy as np
 from tensorflow.keras.callbacks import EarlyStopping  # type: ignore
 
 from dataset import prepare_data
-from noise import add_gaussian_to_dataset
+from noise import add_gaussian_to_dataset, NoisyImageSequence, gaussian_noise
 from model import build_autoencoder
 from visualize import show_denoising_results
 
@@ -37,14 +37,15 @@ def main() -> None:
     train_data, test_data = prepare_data()
 
     # ------------------------------------------------------------------
-    # 2. Generate noisy images
+    # 2. Prepare noisy data generator (on-the-fly to save RAM)
     # ------------------------------------------------------------------
-    print("\n===== Step 2: Generating noisy images =====")
-    gaussian_train_data = add_gaussian_to_dataset(train_data)
+    print("\n===== Step 2: Preparing noise generator =====")
+    batch_size = 32
+    train_gen = NoisyImageSequence(train_data, batch_size=batch_size)
+    # Only pre-generate noisy test data (small enough: ~0.5 GB)
     gaussian_test_data = add_gaussian_to_dataset(test_data)
-
-    print(f"  gaussian_train_data shape: {gaussian_train_data.shape}")
-    print(f"  gaussian_test_data  shape: {gaussian_test_data.shape}")
+    print(f"  Training batches : {len(train_gen)} (generated on-the-fly)")
+    print(f"  gaussian_test_data shape: {gaussian_test_data.shape}")
 
     # ------------------------------------------------------------------
     # 3. Build model
@@ -53,14 +54,12 @@ def main() -> None:
     model = build_autoencoder(input_shape=(300, 300, 3))
 
     # ------------------------------------------------------------------
-    # 4. Train
+    # 4. Train (using generator to avoid OOM)
     # ------------------------------------------------------------------
     print("\n===== Step 4: Training =====")
     model.fit(
-        gaussian_train_data,
-        train_data,
+        train_gen,
         epochs=50,
-        batch_size=32,
         callbacks=[EarlyStopping(monitor="loss", patience=3)],
     )
 

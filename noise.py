@@ -3,6 +3,7 @@
 import cv2
 import numpy as np
 from tqdm import tqdm
+import tensorflow as tf
 
 
 # ---------------------------------------------------------------------------
@@ -126,3 +127,39 @@ def add_gaussian_blur_to_dataset(data: np.ndarray) -> np.ndarray:
     for img in tqdm(data, desc="Adding Gaussian blur"):
         blurred.append(gaussian_blur(img))
     return np.array(blurred)
+
+
+# ---------------------------------------------------------------------------
+# Keras Sequence generator – produces noisy batches on-the-fly to save RAM
+# ---------------------------------------------------------------------------
+
+class NoisyImageSequence(tf.keras.utils.Sequence):
+    """Yields (noisy_batch, clean_batch) without pre-allocating the full
+    noisy dataset in memory.
+
+    Parameters
+    ----------
+    clean_data : np.ndarray
+        Clean images, shape (N, H, W, 3), float32 in [0, 1].
+    batch_size : int
+        Number of images per batch.
+    noise_fn : callable
+        Function that takes a single image and returns a noisy version.
+        Defaults to ``gaussian_noise``.
+    """
+
+    def __init__(self, clean_data: np.ndarray, batch_size: int = 32,
+                 noise_fn=None):
+        self.clean_data = clean_data
+        self.batch_size = batch_size
+        self.noise_fn = noise_fn or gaussian_noise
+
+    def __len__(self) -> int:
+        return int(np.ceil(len(self.clean_data) / self.batch_size))
+
+    def __getitem__(self, idx: int):
+        start = idx * self.batch_size
+        end = min(start + self.batch_size, len(self.clean_data))
+        clean_batch = self.clean_data[start:end]
+        noisy_batch = np.array([self.noise_fn(img) for img in clean_batch])
+        return noisy_batch, clean_batch
