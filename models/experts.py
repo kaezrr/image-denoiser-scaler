@@ -11,11 +11,24 @@ All experts:
   - Output: (B, 3, H*4, W*4) float32 tensor in [0, 1]
   - Parameters: ALL FROZEN (requires_grad=False)
 """
+import sys
+import types
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from PIL import Image
+
+# ── Compatibility shim ───────────────────────────────────────────────────────
+# basicsr<1.4.3 imports rgb_to_grayscale from the now-removed
+# torchvision.transforms.functional_tensor module (dropped in torchvision 0.16).
+# Inject a lightweight alias so basicsr's data package imports cleanly.
+if "torchvision.transforms.functional_tensor" not in sys.modules:
+    import torchvision.transforms.functional as _F
+    _ft = types.ModuleType("torchvision.transforms.functional_tensor")
+    _ft.rgb_to_grayscale = _F.rgb_to_grayscale
+    sys.modules["torchvision.transforms.functional_tensor"] = _ft
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 # ── Expert 1: Real-ESRGAN ────────────────────────────────────────────────────
