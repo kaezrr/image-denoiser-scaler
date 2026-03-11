@@ -8,7 +8,7 @@ Usage
     python train.py --demo     # demo only – load saved model & visualize
 
 The script will:
-1. Download the Microsoft Cats vs Dogs dataset (if not already present)
+1. Download the DIV2K (if not already present)
 2. Preprocess and split images
 3. Generate noisy training / test images
 4. Build and train the convolutional autoencoder (or load a saved one)
