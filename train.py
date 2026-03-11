@@ -1,399 +1,159 @@
 """
 train.py
-========
-Main training script for the RCAN super-resolution model.
+Trains ONLY the SpatialAttentionFusionNet. All experts are frozen.
+Expected training time: ~20-30 minutes on any GPU.
 
-Usage:
-    python train.py                          # Default config (BSD500, all defaults)
-    python train.py --config custom_conf.py  # Custom config file
-
-The training loop:
-  1. Load dataset (BSD500 by default; swap to DIV2K in config)
-  2. Build RCAN model, optimizer, LR scheduler, and loss function
-  3. For each epoch:
-       a. Train: forward → compute loss → backward → optimizer step
-       b. Validate every 5 epochs: compute PSNR/SSIM on val set
-       c. Save checkpoint every SAVE_EVERY epochs
-       d. Save best model (by val PSNR) whenever a new best is found
-  4. Save training summary (CSV + JSON logs)
-
-Resuming:
-    Set RESUME_CHECKPOINT in config to a .pth path, and training will
-    pick up from where it left off (epoch, optimizer state, etc.).
-
-Hardware:
-    Automatically uses CUDA if available, else CPU.
-    To force CPU: set DEVICE = "cpu" in config.
+Run: python train.py [--config config.yaml] [--resume checkpoints/best.pth]
 """
-
-import os
-import sys
-import time
-import random
-import argparse
-import importlib.util
-from pathlib import Path
-
-import numpy as np
+import argparse, os
+import yaml
 import torch
-import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
+from torch.cuda.amp import GradScaler, autocast
+from tqdm import tqdm
 
-# Add project root to path so relative imports work
-sys.path.insert(0, str(Path(__file__).parent))
-
-import configs.rcan_config as config
-
-from models.rcan import build_rcan
-from models.losses import build_loss
-from data.dataset import build_dataset
-from utils.metrics import compute_metrics, AverageMeter
-from utils.checkpoint import save_checkpoint, load_checkpoint, BestCheckpointTracker
-from utils.logger import TrainingLogger
+from data.dataset import make_splits
+from models.experts import ExpertPool, download_realesrgan_weights
+from models.fusion import SpatialAttentionFusionNet
+from models.metrics import psnr, ssim
 
 
-# ---------------------------------------------------------------------------
-# Reproducibility
-# ---------------------------------------------------------------------------
-def set_seed(seed: int):
-    """Fix all random seeds for reproducible training."""
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed)
-    # Deterministic ops (may slow training slightly)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+def parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument("--config", default="config.yaml")
+    p.add_argument("--resume", default=None)
+    return p.parse_args()
 
 
-# ---------------------------------------------------------------------------
-# Training step (one epoch)
-# ---------------------------------------------------------------------------
-def train_one_epoch(
-    model: nn.Module,
-    dataloader: DataLoader,
-    optimizer: torch.optim.Optimizer,
-    loss_fn,
-    device: torch.device,
-    epoch: int,
-    logger: TrainingLogger,
-) -> dict:
-    """
-    Run one full training epoch.
-
-    For each batch:
-      1. Move LR and HR tensors to device
-      2. Forward pass: model(lr) → sr
-      3. Compute loss(sr, hr)
-      4. Backward pass: loss.backward()
-      5. Gradient clipping (prevents exploding gradients in deep networks)
-      6. Optimizer step
-
-    Args
-    ----
-    model      : RCAN model
-    dataloader : training DataLoader
-    optimizer  : Adam optimizer
-    loss_fn    : CombinedLoss instance
-    device     : torch.device
-    epoch      : current epoch number (for logging)
-    logger     : TrainingLogger
-
-    Returns
-    -------
-    avg_losses : dict with average 'total' and 'l1' losses for this epoch
-    """
-    model.train()
-
-    loss_meter = AverageMeter("Loss")
-    n_batches = len(dataloader)
-
-    for batch_idx, (lr, hr) in enumerate(dataloader):
-        lr = lr.to(device, non_blocking=True)
-        hr = hr.to(device, non_blocking=True)
-
-        # Forward pass
-        sr = model(lr)
-
-        # Compute loss
-        total_loss, loss_dict = loss_fn(sr, hr)
-
-        # Backward + gradient clip + step
-        optimizer.zero_grad()
-        total_loss.backward()
-
-        # Gradient clipping: prevents very large gradients in 400+ layer network
-        # Max norm of 1.0 is a safe default for SR models.
-        nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-
-        optimizer.step()
-
-        loss_meter.update(loss_dict["total"], n=lr.size(0))
-
-        # Print progress every 10% of batches
-        if (batch_idx + 1) % max(1, n_batches // 10) == 0:
-            print(
-                f"    Batch [{batch_idx+1}/{n_batches}] "
-                f"Loss: {loss_dict['total']:.4f} "
-                f"(avg: {loss_meter.avg:.4f})"
-            )
-
-    return {"total": loss_meter.avg, "l1": loss_meter.avg}
+def fft_loss(pred, target):
+    return F.l1_loss(
+        torch.abs(torch.fft.rfft2(pred,   norm="ortho")),
+        torch.abs(torch.fft.rfft2(target, norm="ortho")),
+    )
 
 
-# ---------------------------------------------------------------------------
-# Validation step
-# ---------------------------------------------------------------------------
+def save_ckpt(state, path):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    torch.save(state, path)
+    print(f"  ✓ Saved: {path}")
+
+
 @torch.no_grad()
-def validate(
-    model: nn.Module,
-    dataloader: DataLoader,
-    loss_fn,
-    device: torch.device,
-    scale: int,
-) -> tuple:
-    """
-    Run validation: compute average PSNR, SSIM, and loss over the val set.
-
-    The @torch.no_grad() decorator disables gradient computation, saving
-    memory and speeding up inference.
-
-    Args
-    ----
-    model      : RCAN model
-    dataloader : validation DataLoader
-    loss_fn    : loss function
-    device     : torch.device
-    scale      : SR scale factor (for border crop in metrics)
-
-    Returns
-    -------
-    (avg_psnr, avg_ssim, avg_loss_dict) : tuple
-    """
-    model.eval()
-
-    psnr_meter = AverageMeter("PSNR")
-    ssim_meter = AverageMeter("SSIM")
-    loss_meter = AverageMeter("Loss")
-
-    for lr, hr in dataloader:
-        lr = lr.to(device)
-        hr = hr.to(device)
-
-        sr = model(lr)
-
-        # Clamp to valid range before computing metrics
-        sr_clamped = torch.clamp(sr, 0, 1)
-
-        # Compute metrics
-        psnr, ssim = compute_metrics(sr_clamped, hr, scale=scale)
-        psnr_meter.update(psnr, n=lr.size(0))
-        ssim_meter.update(ssim, n=lr.size(0))
-
-        # Compute loss
-        _, loss_dict = loss_fn(sr, hr)
-        loss_meter.update(loss_dict["total"], n=lr.size(0))
-
-    return psnr_meter.avg, ssim_meter.avg, {"total": loss_meter.avg}
+def validate(fusion, experts, loader, device, lc, max_b=20):
+    fusion.eval()
+    tp, ts, n = 0.0, 0.0, 0
+    for i, (lr, hr) in enumerate(loader):
+        if i >= max_b: break
+        lr, hr = lr.to(device), hr.to(device)
+        cat, outs = experts(lr)
+        result = fusion(cat, outs)
+        pred = result["output"].clamp(0, 1)
+        tp += psnr(pred, hr); ts += ssim(pred, hr); n += 1
+    fusion.train()
+    return tp / max(n, 1), ts / max(n, 1)
 
 
-# ---------------------------------------------------------------------------
-# Main training function
-# ---------------------------------------------------------------------------
-def train():
-    """Main training entry point."""
+def main():
+    args = parse_args()
+    with open(args.config) as f: cfg = yaml.safe_load(f)
+    tc, dc = cfg["training"], cfg["data"]
+    lc = cfg["loss"]
 
-    # -------------------------------------------------------------------------
-    # Setup
-    # -------------------------------------------------------------------------
-    set_seed(config.SEED)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Device: {device}")
 
-    # Device selection
-    device = torch.device(
-        "cuda"
-        if torch.cuda.is_available()
-        else "mps" if torch.backends.mps.is_available() else "cpu"
-    )
-    print(f"\n{'='*60}")
-    print(f"RCAN Training — Phase 1 (Microscope)")
-    print(f"{'='*60}")
-    print(f"Device      : {device}")
-    print(f"Dataset     : {config.DATASET_NAME}")
-    print(f"Scale       : ×{config.SCALE_FACTOR}")
-    print(f"Epochs      : {config.NUM_EPOCHS}")
-    print(f"Batch size  : {config.BATCH_SIZE}")
-    print(f"LR          : {config.LEARNING_RATE}")
+    # Download weights
+    download_realesrgan_weights()
 
-    # -------------------------------------------------------------------------
-    # Create output directories
-    # -------------------------------------------------------------------------
-    os.makedirs(config.CHECKPOINT_DIR, exist_ok=True)
-    os.makedirs(config.LOG_DIR, exist_ok=True)
-    os.makedirs(config.SAMPLE_DIR, exist_ok=True)
+    # Data
+    train_ds, val_ds = make_splits(cfg)
+    pin = device.type == "cuda"
+    train_dl = DataLoader(train_ds, tc["batch_size"], shuffle=True,
+                          num_workers=dc["num_workers"], pin_memory=pin, drop_last=True)
+    val_dl   = DataLoader(val_ds, 1, shuffle=False, num_workers=2)
 
-    # -------------------------------------------------------------------------
-    # Datasets and DataLoaders
-    # -------------------------------------------------------------------------
-    print("\nLoading datasets...")
-    train_dataset = build_dataset(config, split="train")
-    val_dataset = build_dataset(config, split="val")
+    # Models
+    experts = ExpertPool(cfg, device)       # ALL FROZEN
+    fusion  = SpatialAttentionFusionNet(cfg).to(device)
 
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=config.BATCH_SIZE,
-        shuffle=True,
-        num_workers=config.NUM_WORKERS,
-        pin_memory=config.PIN_MEMORY and device.type == "cuda",
-        drop_last=True,  # Drop last batch if smaller than batch_size
-    )
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=1,  # Val one image at a time for precise metrics
-        shuffle=False,
-        num_workers=config.NUM_WORKERS,
-        pin_memory=False,
-    )
+    n_params = sum(p.numel() for p in fusion.parameters()) / 1e6
+    print(f"Fusion network trainable parameters: {n_params:.3f}M")
+    print(f"Expert parameters (frozen): {sum(p.numel() for p in experts.parameters()) / 1e6:.1f}M")
 
-    print(
-        f"  Train: {len(train_dataset)} samples, " f"{len(train_loader)} batches/epoch"
-    )
-    print(f"  Val  : {len(val_dataset)} samples")
+    optimizer = torch.optim.AdamW(fusion.parameters(), lr=tc["lr"], weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=tc["total_iters"], eta_min=tc["lr_min"])
+    scaler = GradScaler(enabled=tc["amp"] and device.type == "cuda")
 
-    # -------------------------------------------------------------------------
-    # Model
-    # -------------------------------------------------------------------------
-    print("\nBuilding RCAN model...")
-    model = build_rcan(config).to(device)
-    n_params = model.count_parameters()
-    print(f"  Parameters: {n_params:,}")
-    print(
-        f"  Architecture: {config.N_RESGROUPS} groups × "
-        f"{config.N_RESBLOCKS} RCAB blocks × {config.N_FEATS} channels"
-    )
+    start_iter, best_psnr = 0, 0.0
+    if args.resume:
+        ck = torch.load(args.resume, map_location="cpu")
+        fusion.load_state_dict(ck["fusion"])
+        optimizer.load_state_dict(ck["optimizer"])
+        scaler.load_state_dict(ck["scaler"])
+        start_iter = ck["iteration"]
+        print(f"Resumed from iter {start_iter}")
 
-    # -------------------------------------------------------------------------
-    # Loss, Optimizer, Scheduler
-    # -------------------------------------------------------------------------
-    loss_fn = build_loss(config)
+    fusion.train()
+    data_iter = iter(train_dl)
+    pbar = tqdm(range(start_iter, tc["total_iters"]),
+                initial=start_iter, total=tc["total_iters"], desc="Training fusion")
 
-    # Adam is the standard optimizer for SR. Betas and LR from the paper.
-    optimizer = torch.optim.Adam(
-        model.parameters(),
-        lr=config.LEARNING_RATE,
-        betas=(config.ADAM_BETA1, config.ADAM_BETA2),
-    )
+    for it in pbar:
+        try:
+            lr_b, hr_b = next(data_iter)
+        except StopIteration:
+            data_iter = iter(train_dl)
+            lr_b, hr_b = next(data_iter)
 
-    # StepLR: halve the learning rate every LR_DECAY_STEP epochs.
-    # This is exactly the paper's schedule (LR halved every 200 epochs).
-    scheduler = torch.optim.lr_scheduler.StepLR(
-        optimizer,
-        step_size=config.LR_DECAY_STEP,
-        gamma=config.LR_DECAY_GAMMA,
-    )
+        lr_b = lr_b.to(device, non_blocking=True)
+        hr_b = hr_b.to(device, non_blocking=True)
 
-    # -------------------------------------------------------------------------
-    # Resume from checkpoint (optional)
-    # -------------------------------------------------------------------------
-    start_epoch = 1
-    resume_path = getattr(config, "RESUME_CHECKPOINT", None)
-    if resume_path and os.path.exists(resume_path):
-        print(f"\nResuming from: {resume_path}")
-        ckpt = load_checkpoint(resume_path, model, optimizer, str(device))
-        start_epoch = ckpt.get("epoch", 0) + 1
-        # Advance scheduler to match resumed epoch
-        for _ in range(start_epoch - 1):
-            scheduler.step()
+        # Warmup
+        if it < tc["warmup_iters"]:
+            for pg in optimizer.param_groups:
+                pg["lr"] = tc["lr"] * (it + 1) / tc["warmup_iters"]
 
-    # -------------------------------------------------------------------------
-    # Logging and checkpoint tracking
-    # -------------------------------------------------------------------------
-    logger = TrainingLogger(config.LOG_DIR)
-    tracker = BestCheckpointTracker(config.CHECKPOINT_DIR, config.MAX_KEEP_CHECKPOINTS)
+        optimizer.zero_grad(set_to_none=True)
 
-    # -------------------------------------------------------------------------
-    # Training Loop
-    # -------------------------------------------------------------------------
-    print(f"\n{'─'*60}")
-    print(f"Starting training from epoch {start_epoch}...")
-    print(f"{'─'*60}\n")
+        # Get frozen expert outputs (no grad needed)
+        with torch.no_grad():
+            cat, outs = experts(lr_b)
 
-    for epoch in range(start_epoch, config.NUM_EPOCHS + 1):
-        epoch_start = time.time()
+        # Train only fusion net
+        with autocast(enabled=tc["amp"] and device.type == "cuda"):
+            result = fusion(cat, outs)
+            pred   = result["output"]
+            loss   = lc["l1_weight"]  * F.l1_loss(pred, hr_b) + \
+                     lc["fft_weight"] * fft_loss(pred, hr_b)
 
-        # --- Train ---
-        print(f"Epoch {epoch}/{config.NUM_EPOCHS}")
-        train_losses = train_one_epoch(
-            model, train_loader, optimizer, loss_fn, device, epoch, logger
-        )
+        scaler.scale(loss).backward()
+        scaler.unscale_(optimizer)
+        torch.nn.utils.clip_grad_norm_(fusion.parameters(), 1.0)
+        scaler.step(optimizer)
+        scaler.update()
+        if it >= tc["warmup_iters"]: scheduler.step()
 
-        # Advance LR scheduler
-        scheduler.step()
-        current_lr = scheduler.get_last_lr()[0]
+        if (it + 1) % tc["log_every"] == 0:
+            pbar.set_postfix(loss=f"{loss.item():.4f}", lr=f'{optimizer.param_groups[0]["lr"]:.2e}')
 
-        epoch_time = time.time() - epoch_start
+        if (it + 1) % tc["eval_every"] == 0:
+            vp, vs = validate(fusion, experts, val_dl, device, lc)
+            print(f"\n  [iter {it+1}] Val PSNR: {vp:.2f} dB | SSIM: {vs:.4f}")
+            if vp > best_psnr:
+                best_psnr = vp
+                save_ckpt({"fusion": fusion.state_dict(), "optimizer": optimizer.state_dict(),
+                           "scaler": scaler.state_dict(), "iteration": it + 1, "psnr": vp},
+                          f"{tc['checkpoint_dir']}/best.pth")
 
-        # --- Log training metrics ---
-        logger.log_train(epoch, train_losses, current_lr, epoch_time)
+        if (it + 1) % tc["save_every"] == 0:
+            save_ckpt({"fusion": fusion.state_dict(), "optimizer": optimizer.state_dict(),
+                       "scaler": scaler.state_dict(), "iteration": it + 1},
+                      f"{tc['checkpoint_dir']}/iter_{it+1:06d}.pth")
 
-        # --- Validate every 5 epochs (or on last epoch) ---
-        if epoch % 5 == 0 or epoch == config.NUM_EPOCHS:
-            val_psnr, val_ssim, val_losses = validate(
-                model, val_loader, loss_fn, device, config.SCALE_FACTOR
-            )
-            logger.log_val(epoch, val_psnr, val_ssim, val_losses)
-
-            # --- Save checkpoint ---
-            if epoch % config.SAVE_EVERY == 0 or epoch == config.NUM_EPOCHS:
-                ckpt_filename = f"checkpoint_epoch{epoch:04d}_psnr{val_psnr:.2f}.pth"
-                ckpt_path = save_checkpoint(
-                    model,
-                    optimizer,
-                    epoch,
-                    metrics={"psnr": val_psnr, "ssim": val_ssim},
-                    checkpoint_dir=config.CHECKPOINT_DIR,
-                    filename=ckpt_filename,
-                    is_best=tracker.update(val_psnr, ckpt_filename),
-                )
-
-        print()  # blank line between epochs
-
-    # -------------------------------------------------------------------------
-    # Final summary
-    # -------------------------------------------------------------------------
-    logger.save_summary(
-        {
-            "dataset": config.DATASET_NAME,
-            "scale": config.SCALE_FACTOR,
-            "n_resgroups": config.N_RESGROUPS,
-            "n_resblocks": config.N_RESBLOCKS,
-            "n_feats": config.N_FEATS,
-            "epochs": config.NUM_EPOCHS,
-            "batch_size": config.BATCH_SIZE,
-        }
-    )
+    print(f"\nDone. Best Val PSNR: {best_psnr:.2f} dB")
 
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train RCAN for image SR")
-    parser.add_argument(
-        "--config",
-        type=str,
-        default=None,
-        help="Optional path to a custom config .py file. "
-        "Defaults to configs/rcan_config.py",
-    )
-    args = parser.parse_args()
-
-    if args.config:
-        # Load a custom config module if provided
-        spec = importlib.util.spec_from_file_location("custom_config", args.config)
-        config = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(config)
-        print(f"Using custom config: {args.config}")
-
-    train()
+    main()
