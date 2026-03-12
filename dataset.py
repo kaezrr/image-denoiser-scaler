@@ -1,52 +1,16 @@
-"""Dataset download, extraction and loading for the DIV2K dataset."""
+"""Dataset download, extraction and loading for the DIV2K dataset via TensorFlow Datasets."""
 
 import os
-import zipfile
-import glob
 
 import cv2
 import numpy as np
-import requests
 from tqdm import tqdm
+import tensorflow_datasets as tfds
 
-# DIV2K high-resolution training images (800 images, ~4GB)
-DATASET_URL = "http://data.vision.ee.ethz.ch/cvl/DIV2K/DIV2K_train_HR.zip"
 DATASET_DIR = os.path.join(os.path.dirname(__file__), "data")
-ZIP_PATH = os.path.join(DATASET_DIR, "DIV2K_train_HR.zip")
-EXTRACT_DIR = os.path.join(DATASET_DIR, "DIV2K_train_HR")
 
 IMG_SIZE = 300
 PATCH_SIZE = IMG_SIZE  # alias for clarity
-
-
-def _download_dataset() -> None:
-    """Download the DIV2K zip archive if it is not already present."""
-    if os.path.exists(ZIP_PATH):
-        print("[dataset] Zip already downloaded, skipping.")
-        return
-
-    os.makedirs(DATASET_DIR, exist_ok=True)
-    print(f"[dataset] Downloading DIV2K dataset from {DATASET_URL} ...")
-    resp = requests.get(DATASET_URL, stream=True)
-    resp.raise_for_status()
-    total = int(resp.headers.get("content-length", 0))
-    with open(ZIP_PATH, "wb") as f, tqdm(total=total, unit="B", unit_scale=True, desc="Download") as bar:
-        for chunk in resp.iter_content(chunk_size=1 << 20):
-            f.write(chunk)
-            bar.update(len(chunk))
-    print("[dataset] Download complete.")
-
-
-def _extract_dataset() -> None:
-    """Extract the zip archive if the extraction directory does not exist."""
-    if os.path.isdir(EXTRACT_DIR):
-        print("[dataset] Already extracted, skipping.")
-        return
-
-    print("[dataset] Extracting archive ...")
-    with zipfile.ZipFile(ZIP_PATH, "r") as zf:
-        zf.extractall(DATASET_DIR)
-    print("[dataset] Extraction complete.")
 
 
 def _random_crop(img: np.ndarray, crop_size: int, rng: np.random.RandomState) -> np.ndarray:
@@ -65,7 +29,7 @@ def _random_crop(img: np.ndarray, crop_size: int, rng: np.random.RandomState) ->
 
 
 def _load_images(max_images: int = 5000, patches_per_image: int = 6) -> np.ndarray:
-    """Load DIV2K images and extract random crops, returning as an array.
+    """Load DIV2K images via TFDS and extract random crops.
 
     DIV2K has only 800 training images, so we extract multiple random
     patches per image to reach the desired dataset size.
@@ -82,25 +46,28 @@ def _load_images(max_images: int = 5000, patches_per_image: int = 6) -> np.ndarr
     np.ndarray
         Array of shape (N, PATCH_SIZE, PATCH_SIZE, 3), dtype uint8.
     """
-    image_paths = sorted(glob.glob(os.path.join(EXTRACT_DIR, "*.png")))
-    if not image_paths:
-        raise FileNotFoundError(f"No .png images found in {EXTRACT_DIR}")
+    print("[dataset] Loading DIV2K via TensorFlow Datasets (auto download if needed)...")
+    ds = tfds.load(
+        "div2k/bicubic_x2",
+        split="train",
+        data_dir=DATASET_DIR,
+        as_supervised=False,
+        shuffle_files=False,
+    )
 
     rng = np.random.RandomState(42)
-    rng.shuffle(image_paths)
-
     patches: list[np.ndarray] = []
-    for path in tqdm(image_paths, desc="Loading images"):
+
+    for sample in tqdm(ds, desc="Loading images"):
         if len(patches) >= max_images:
             break
-        img = cv2.imread(path)
-        if img is None:
-            continue  # skip corrupt files
+        # TFDS returns tf.Tensor — convert to numpy, RGB→BGR for opencv consistency
+        img = sample["hr"].numpy()                    # shape (H, W, 3), RGB uint8
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
         for _ in range(patches_per_image):
             if len(patches) >= max_images:
                 break
-            patch = _random_crop(img, PATCH_SIZE, rng)
-            patches.append(patch)
+            patches.append(_random_crop(img, PATCH_SIZE, rng))
 
     data = np.array(patches, dtype=np.uint8)
     print(f"[dataset] Loaded {len(data)} patches with shape {data.shape}")
@@ -108,15 +75,15 @@ def _load_images(max_images: int = 5000, patches_per_image: int = 6) -> np.ndarr
 
 
 def prepare_data():
-    """Full pipeline: download → extract → load → split → normalise.
+    """Full pipeline: download → load → split → normalise.
+
+    TFDS handles download, extraction and caching automatically.
 
     Returns
     -------
     train_data : np.ndarray   (2500, 300, 300, 3) float32 in [0, 1]
     test_data  : np.ndarray   (500, 300, 300, 3) float32 in [0, 1]
     """
-    _download_dataset()
-    _extract_dataset()
     data = _load_images(max_images=5000, patches_per_image=6)
 
     train_data = data[:2500].astype(np.float32) / 255.0
