@@ -1,5 +1,7 @@
 """Visualization helpers for comparing noisy, denoised and original images."""
 
+import os
+
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -11,7 +13,7 @@ def show_denoising_results(
     denoised_images: np.ndarray,
     original_images: np.ndarray,
     n: int = 5,
-    save_path: str | None = "denoising_results.png",
+    save_path: str | None = "Results/denoising_results.png",
 ) -> None:
     """Display a grid of noisy → denoised → original image triplets.
 
@@ -26,7 +28,8 @@ def show_denoising_results(
     n : int
         Number of examples to display.
     save_path : str or None
-        If given, save the figure to this path.
+        If given, save the figure to this path. Parent directory is created
+        automatically if it does not exist.
     """
     n = min(n, len(noisy_images))
     fig, axes = plt.subplots(n, 3, figsize=(12, 4 * n))
@@ -42,6 +45,8 @@ def show_denoising_results(
 
     plt.tight_layout()
     if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, dpi=120)
         print(f"[visualize] Results saved to {save_path}")
     plt.show()
+    

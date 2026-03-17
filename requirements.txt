@@ -5,3 +5,5 @@ matplotlib
 scikit-learn
 tqdm
 requests
+tensorflow-datasets
+importlib_resources
