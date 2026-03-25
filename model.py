@@ -31,6 +31,10 @@ Why this design
 """
 
 import tensorflow as tf  # type: ignore
+from tensorflow.keras import mixed_precision  # type: ignore
+
+# float16 activations, float32 weights — halves activation VRAM on T4
+mixed_precision.set_global_policy("mixed_float16")
 from tensorflow.keras.layers import (  # type: ignore
     Add,
     BatchNormalization,
@@ -183,56 +187,58 @@ def build_autoencoder(input_shape: tuple = (300, 300, 3)) -> Model:
     # ------------------------------------------------------------------
 
     # Stage 1 — Inception  [300×300 → 150×150]
-    e1 = inception_block(inp, filters=16)       # → 64 ch (4×16)
-    skip_1 = e1                                  # save for decoder
+    # filters=8 → 32 ch total (4×8).  Kept small because spatial size is
+    # largest here — memory cost scales with H×W×C.
+    e1 = inception_block(inp, filters=8)        # → 32 ch
+    skip_1 = e1
     e1 = MaxPooling2D((2, 2))(e1)
 
     # Stage 2 — two stacked Residual blocks  [150×150 → 75×75]
-    e2 = residual_block(e1, filters=128)
-    e2 = residual_block(e2, filters=128)
+    e2 = residual_block(e1, filters=64)
+    e2 = residual_block(e2, filters=64)
     skip_2 = e2
     e2 = MaxPooling2D((2, 2))(e2)
 
     # Stage 3 — Inception  [75×75 → 38×38]
-    e3 = inception_block(e2, filters=64)        # → 256 ch (4×64)
+    e3 = inception_block(e2, filters=32)        # → 128 ch (4×32)
     skip_3 = e3
     e3 = MaxPooling2D((2, 2))(e3)
 
     # ------------------------------------------------------------------
-    # Bottleneck  [38×38]
+    # Bottleneck  [38×38]  — halved from 512 → 256
     # ------------------------------------------------------------------
-    bn = Conv2D(512, (3, 3), padding="same")(e3)
+    bn = Conv2D(256, (3, 3), padding="same")(e3)
     bn = _bn_relu(bn)
 
     # ------------------------------------------------------------------
     # Decoder  (each level: upsample → concat skip → conv)
     # ------------------------------------------------------------------
 
-    # Stage 1  [37 → 74 → concat → 75]
+    # Stage 1  [37 → 74]
     d1 = UpSampling2D((2, 2))(bn)
     skip_3_cropped = Lambda(lambda t: _crop_to_match(t[0], t[1]))([skip_3, d1])
     d1 = Concatenate()([d1, skip_3_cropped])
-    d1 = Conv2D(256, (3, 3), padding="same")(d1)
+    d1 = Conv2D(128, (3, 3), padding="same")(d1)
     d1 = _bn_relu(d1)
 
-    # Stage 2  [74 → 148 → concat → 150]
+    # Stage 2  [74 → 148]
     d2 = UpSampling2D((2, 2))(d1)
     skip_2_cropped = Lambda(lambda t: _crop_to_match(t[0], t[1]))([skip_2, d2])
     d2 = Concatenate()([d2, skip_2_cropped])
-    d2 = Conv2D(128, (3, 3), padding="same")(d2)
+    d2 = Conv2D(64, (3, 3), padding="same")(d2)
     d2 = _bn_relu(d2)
 
-    # Stage 3  [148 → 296 → concat → 300]
+    # Stage 3  [148 → 296]
     d3 = UpSampling2D((2, 2))(d2)
     skip_1_cropped = Lambda(lambda t: _crop_to_match(t[0], t[1]))([skip_1, d3])
     d3 = Concatenate()([d3, skip_1_cropped])
-    d3 = Conv2D(64, (3, 3), padding="same")(d3)
+    d3 = Conv2D(32, (3, 3), padding="same")(d3)
     d3 = _bn_relu(d3)
 
     # ------------------------------------------------------------------
     # Output — resize back to exact input spatial size if needed
     # ------------------------------------------------------------------
-    out_pre = Conv2D(3, (3, 3), padding="same")(d3)
+    out_pre = Conv2D(3, (3, 3), padding="same", dtype="float32")(d3)
     # Bilinear resize guarantees exact H×W match regardless of crop accumulation
     out = Lambda(
         lambda t: tf.image.resize(t, (input_shape[0], input_shape[1]))

@@ -56,7 +56,7 @@ def main() -> None:
         # 2. Prepare noisy data generator (on-the-fly to save RAM)
         # --------------------------------------------------------------
         print("\n===== Step 2: Preparing noise generator =====")
-        batch_size = 32
+        batch_size = 8  # reduced from 32 to fit T4 VRAM with this architecture
         train_gen = NoisyImageSequence(train_data, batch_size=batch_size)
         print(f"  Training batches : {len(train_gen)} (generated on-the-fly)")
 
