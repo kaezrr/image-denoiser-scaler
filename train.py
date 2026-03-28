@@ -3,9 +3,10 @@
 
 Usage
 -----
-    python train.py            # train (or skip if saved model exists)
-    python train.py --train    # force re-training even if model exists
-    python train.py --demo     # demo only – load saved model & visualize
+    python train.py                          # train with default name "denoiser_model"
+    python train.py --name my_model          # train and save as models/my_model.keras
+    python train.py --name my_model --train  # force re-train even if model exists
+    python train.py --name my_model --demo   # load models/my_model.keras and visualize
 
 The script will:
 1. Download the DIV2K (if not already present)
@@ -32,16 +33,29 @@ from noise import add_gaussian_to_dataset, NoisyImageSequence, gaussian_noise
 from model import build_autoencoder
 from visualize import show_denoising_results
 
-MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "denoiser_model.keras")
+_BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
+MODELS_DIR   = os.path.join(_BASE_DIR, "models")
+RESULTS_DIR  = os.path.join(_BASE_DIR, "Results")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Image denoising autoencoder")
+    parser.add_argument("--name", default="denoiser_model",
+                        help="Model name — saved as models/<name>.keras "
+                             "and Results/<name>_results.png (default: denoiser_model)")
     parser.add_argument("--train", action="store_true",
                         help="Force re-training even if a saved model exists")
     parser.add_argument("--demo", action="store_true",
                         help="Demo only – load saved model and visualize results")
     args = parser.parse_args()
+
+    # Derive all paths from the model name
+    MODEL_NAME   = args.name
+    MODEL_PATH   = os.path.join(MODELS_DIR, f"{MODEL_NAME}.keras")
+    RESULTS_PATH = os.path.join(RESULTS_DIR, f"{MODEL_NAME}_results.png")
+
+    os.makedirs(MODELS_DIR,  exist_ok=True)
+    os.makedirs(RESULTS_DIR, exist_ok=True)
 
     need_training = args.train or (not args.demo and not os.path.exists(MODEL_PATH))
 
@@ -56,7 +70,7 @@ def main() -> None:
         # 2. Prepare noisy data generator (on-the-fly to save RAM)
         # --------------------------------------------------------------
         print("\n===== Step 2: Preparing noise generator =====")
-        batch_size = 8  # reduced from 32 to fit T4 VRAM with this architecture
+        batch_size = 16
         train_gen = NoisyImageSequence(train_data, batch_size=batch_size)
         print(f"  Training batches : {len(train_gen)} (generated on-the-fly)")
 
@@ -106,6 +120,7 @@ def main() -> None:
         denoised_images=denoised,
         original_images=test_data[:5],
         n=5,
+        save_path=RESULTS_PATH,
     )
 
 
