@@ -19,6 +19,7 @@ Output  : Conv(3, sigmoid)                   [300×300×3]
 """
 
 import tensorflow as tf  # type: ignore
+import keras             # type: ignore
 from tensorflow.keras import mixed_precision  # type: ignore
 
 mixed_precision.set_global_policy("mixed_float16")
@@ -41,7 +42,8 @@ from tensorflow.keras.optimizers import Adam  # type: ignore
 # Custom layers — replacing Lambda so models save/load without safe_mode
 # ---------------------------------------------------------------------------
 
-class CropToMatch(tf.keras.layers.Layer):
+@keras.saving.register_keras_serializable()
+class CropToMatch(keras.layers.Layer):
     """Center-crop the skip tensor so its H×W matches the target tensor.
 
     Why this exists
@@ -76,7 +78,8 @@ class CropToMatch(tf.keras.layers.Layer):
         return super().get_config()
 
 
-class ResizeTo(tf.keras.layers.Layer):
+@keras.saving.register_keras_serializable()
+class ResizeTo(keras.layers.Layer):
     """Bilinear resize to a fixed (H, W) — used at the decoder output.
 
     Why this exists

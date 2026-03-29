@@ -7,3 +7,4 @@ tqdm
 requests
 tensorflow-datasets
 importlib_resources
+scikit-image
