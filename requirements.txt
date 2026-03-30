@@ -7,3 +7,7 @@ tqdm
 requests
 tensorflow-datasets
 importlib_resources
+bchlib
+Pillow
+scipy
+scikit-image
