@@ -4,6 +4,8 @@ import os
 
 import matplotlib.pyplot as plt
 import numpy as np
+import cv2 
+
 
 from utils import plot_rgb_img
 
@@ -50,3 +52,33 @@ def show_denoising_results(
         print(f"[visualize] Results saved to {save_path}")
     plt.show()
     
+
+def show_sr_results(
+    lr_images: np.ndarray,
+    sr_images: np.ndarray,
+    hr_images: np.ndarray,
+    n: int = 5,
+    save_path: str | None = None,
+) -> None:
+    """Display a grid of Low-Res → Super-Res → High-Res triplets."""
+    n = min(n, len(lr_images))
+    fig, axes = plt.subplots(n, 3, figsize=(12, 4 * n))
+    if n == 1:
+        axes = axes[np.newaxis, :]
+
+    titles = ["Low-Res (Bicubic)", "Super-Res (Model)", "High-Res (Ground Truth)"]
+    for i in range(n):
+        # Resize LR visually just so it displays at the same size as the others in the grid
+        lr_resized = cv2.resize(lr_images[i], (hr_images[i].shape[1], hr_images[i].shape[0]), interpolation=cv2.INTER_NEAREST)
+        
+        for j, img in enumerate([lr_resized, sr_images[i], hr_images[i]]):
+            axes[i, j].imshow(plot_rgb_img(img))
+            axes[i, j].set_title(titles[j])
+            axes[i, j].axis("off")
+
+    plt.tight_layout()
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, dpi=120)
+        print(f"[visualize] Results saved to {save_path}")
+    plt.show()
