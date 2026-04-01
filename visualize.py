@@ -6,8 +6,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import cv2 
 
-
-from utils import plot_rgb_img
+try:
+    from archive.utils import plot_rgb_img
+except ImportError:
+    from utils import plot_rgb_img
 
 
 def show_denoising_results(
