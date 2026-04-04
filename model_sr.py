@@ -1,11 +1,11 @@
 """Super-Resolution model — EDSR-lite with combined MAE + SSIM loss.
 
-Architecture (unchanged from baseline)
+Architecture (Fixed Tail)
 ---------------------------------------
 Input   : Degraded LR patch  (150×150×3)
 Head    : Conv2D(64)
 Body    : ResidualBlock(64) × num_res_blocks  — no BN, no pooling
-Tail    : Conv2D(12) → SubPixelConv2D(scale=2) → sigmoid
+Tail    : Conv2D(64 * scale^2) → SubPixelConv2D(scale=2) → Conv2D(3, linear)
 Output  : Clean HR patch     (300×300×3)
 
 What changed
@@ -207,20 +207,21 @@ def build_sr_model(
     x = Conv2D(64, (3, 3), padding="same")(x)
     x = Add()([x, x_head])
 
-    # Tail — pixel shuffle upscaling
-    # Need 3 × scale² output channels so depth_to_space gives 3-channel HR
-    out_filters = 3 * (scale ** 2)   # = 12 for scale=2
-    x   = Conv2D(out_filters, (3, 3), padding="same")(x)
-    out = SubPixelConv2D(scale_factor=scale)(x)
+    # Tail — pixel shuffle upscaling (FIXED ARCHITECTURE)
+    # 1. Maintain high feature depth before shuffling
+    out_filters = 64 * (scale ** 2)   
+    x = Conv2D(out_filters, (3, 3), padding="same")(x)
+    x = SubPixelConv2D(scale_factor=scale)(x)
 
-    # Cast to float32 for mixed-precision safety, clip to [0,1]
-    out = Activation("sigmoid", dtype="float32")(out)
+    # 2. Final smoothing convolution to map high-res features back to 3 RGB channels
+    # 3. Use linear activation to prevent dynamic range crushing
+    out = Conv2D(3, (3, 3), padding="same", activation="linear", dtype="float32")(x)
 
     model = Model(inputs=inp, outputs=out)
 
     model.compile(
         optimizer=Adam(learning_rate=1e-4),
-        loss=combined_loss,
+        loss=combined_loss, # Note: Remember to train on pure MAE first if training from scratch!
         metrics=[PSNRMetric(), SSIMMetric()],
     )
     model.summary()
