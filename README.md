@@ -1,6 +1,17 @@
-# image-denoiser-upscaler
+# image-denoiser-scaler
 
-Convolutional autoencoder that removes Gaussian noise from images (for now). Trained on DIV2K.
+A learning-focused deep learning project built on DIV2K for:
+- image denoising (archived pipeline), and
+- image super-resolution (current SR pipeline).
+
+The repo contains both legacy experiments in `archive/` and newer SR-focused scripts in the root.
+
+## Why this project exists
+
+This is a hands-on learning project to compare model design tradeoffs:
+- simple vs deeper denoising architectures,
+- clean-trained vs robust-trained SR models,
+- quality vs speed vs power.
 
 ## Setup
 
@@ -8,83 +19,147 @@ Convolutional autoencoder that removes Gaussian noise from images (for now). Tra
 pip install -r requirements.txt
 ```
 
-## Usage
+## Project layout (important)
+
+- `archive/`:
+    - legacy denoising + baseline SR training scripts,
+    - includes the denoiser models and baseline EDSR-lite training flow.
+- root (`train_sr.py`, `benchmark_sr.py`, `plots.py`, `model_sr.py`, ...):
+    - newer SR workflow,
+    - robust EDSR-lite training + SR benchmark + plotting suite.
+
+## Models covered (4 total)
+
+| # | Model | Task | Location | Train script | Benchmark |
+|---|---|---|---|---|---|
+| 1 | Simple Denoiser | Denoising | archived/registered (`models/simple_denoiser.keras`) | (pretrained baseline in registry) | `python archive/benchmark.py` |
+| 2 | Inception-ResNet | Denoising | `archive/model_de.py` | `python archive/train_de.py --name inception_resnet --train` | `python archive/benchmark.py` |
+| 3 | EDSR-lite (clean trained) | Super-resolution | `archive/model_up.py` | `python archive/train_up.py --name sr_edsr_model --train` | `python benchmark_sr.py` |
+| 4 | EDSR-lite (robust trained) | Super-resolution | `model_sr.py` | `python train_sr.py --name sr_robust_model --train` | `python benchmark_sr.py` |
+
+## Training commands
+
+### Denoising (archive)
 
 ```bash
-python train.py                          # train with default name "denoiser_model"
-python train.py --name my_model          # train and save as models/my_model.keras
-python train.py --name my_model --train  # force re-train even if model exists
-python train.py --name my_model --demo   # load models/my_model.keras and visualize
+# Inception-ResNet denoiser
+python archive/train_de.py --name inception_resnet --train
 
-python benchmark.py                      # benchmark all models saved in models/
+# Demo from saved model
+python archive/train_de.py --name inception_resnet --demo
 ```
 
-Saves `models/<my_model>.keras` and `Results/<my_model>_results.png` after training.
+### Super-resolution
 
+```bash
+# Baseline EDSR-lite (clean-trained, archive pipeline)
+python archive/train_up.py --name sr_edsr_model --train
 
-## Results
+# Robust EDSR-lite (new SR pipeline)
+python train_sr.py --name sr_robust_model --train
 
-![Results](Results/inception_resnet_results.png)
-
-## How it works
-
-DIV2K's 800 training images are cropped into 300×300 patches (6 per image) to get ~5000 samples. Gaussian noise is added on-the-fly during training so we don't need to store a second copy of the dataset in memory.
-
-The model is a Hybrid Inception-ResNet autoencoder for image denoising / super-resolution.
-
-`benchmark.py` evaluates all registered models and saves results to `benchmark_results/report.md`.
-
-### Architecture
-
-**Encoder**
-
-    Stage 1 : InceptionBlock(64)   → MaxPool  [300→150]  — skip_1
-    Stage 2 : ResidualBlock(128)×2 → MaxPool  [150→75]   — skip_2
-    Stage 3 : InceptionBlock(256)  → MaxPool  [75→38]    — skip_3
-
-**Bottleneck**
-
-    Conv(512) → BN → ReLU                    [38×38]
-
-**Decoder** (U-Net style — concat skip at each level)
-
-    Stage 1 : UpSample → concat(skip_3) → Conv(256)  [38→75]
-    Stage 2 : UpSample → concat(skip_2) → Conv(128)  [75→150]
-    Stage 3 : UpSample → concat(skip_1) → Conv(64)   [150→300]
-
-**Output** : Conv(3, sigmoid)                [300×300×3]
-
-Adam + MSE loss. Early stopping with patience=3.
-
-## Files
-
-```
-image-denoiser-upscaler/
-├── train.py               main script
-├── benchmark.py           multi-model benchmark + Markdown report
-├── model.py               autoencoder architecture
-├── dataset.py             DIV2K download + patch extraction via TFDS
-├── noise.py               noise functions + Keras Sequence generator
-├── visualize.py           results grid (noisy / denoised / original)
-├── utils.py               BGR→RGB helper for matplotlib
-├── requirements.txt
-├── models/
-│   └── model_registry.json    model details and training times
-├── benchmark_results/
-│   └── report.md
-├── Results/
-│   ├── simple_denoiser.png
-│   └── inception_resnet_results.png
-└── README.md
+# Demo robust model
+python train_sr.py --name sr_robust_model --demo
 ```
 
-Dataset is cached to `./data/` on first run.
+## Benchmark commands
 
+```bash
+# Denoiser benchmark report (Simple Denoiser + Inception-ResNet)
+python archive/benchmark.py
 
----
+# SR benchmark report (EDSR-lite clean vs robust)
+python benchmark_sr.py
+```
 
-## Roadmap
+Generated reports:
+- `benchmark_results/report.md`
+- `sr_benchmark_results/report.md`
 
-- [ ] Super-resolution upscaling (DIV2K already has bicubic-downscaled pairs so the data side is sorted)
-- [ ] Web GUI for live super-resolution
-- [ ] Model comparison — training time, denoising speed, and upscaling speed across all implemented models
+## Plotting and analysis
+
+Use `plots.py` for SR diagnostics (training curves, robustness charts, qualitative visuals):
+
+```bash
+# Generate full SR plot suite
+python plots.py
+
+# Single model focus
+python plots.py --model sr_robust_model
+
+# Skip inference-heavy plots
+python plots.py --no-model
+```
+
+Outputs are saved in `plots/`.
+
+## Current results snapshot
+
+### 1) Simple Denoiser (denoising)
+- PSNR: **21.34 dB**
+- SSIM: **0.6337**
+- Inference: **26.0 ms/img**
+
+### 2) Inception-ResNet (denoising)
+- PSNR: **22.96 dB**
+- SSIM: **0.6382**
+- Inference: **221.1 ms/img**
+
+### 3) EDSR-lite (clean trained, SR)
+- PSNR clean: **31.84 dB**
+- PSNR degraded: **17.24 dB**
+- Robustness drop: **14.60 dB**
+
+### 4) EDSR-lite (robust trained, SR)
+- PSNR clean: **26.08 dB**
+- PSNR degraded: **22.79 dB**
+- Robustness drop: **3.29 dB**
+
+Interpretation:
+- clean-trained EDSR-lite reaches higher clean PSNR,
+- robust-trained EDSR-lite is much more stable under noisy/JPEG-degraded LR inputs.
+
+## Visual results
+
+- Denoiser examples: `benchmark_results/images/`
+- SR examples: `sr_benchmark_results/images/`
+- Training/analysis plots: `plots/`
+
+### Denoiser comparison
+
+#### Simple Denoiser
+
+![Simple Denoiser comparison](<benchmark_results/images/Simple_Denoiser/comparison.png>)
+
+#### Inception-ResNet
+
+![Inception-ResNet comparison](<benchmark_results/images/Inception-ResNet/comparison.png>)
+
+### Super-resolution comparison
+
+#### EDSR-lite (clean trained)
+
+Clean LR input (LR → SR → HR)
+
+![EDSR-lite clean-trained clean input](<sr_benchmark_results/images/EDSR-lite_(clean_trained)/clean_comparison.png>)
+
+Degraded LR input (noisy/JPEG LR → SR → HR)
+
+![EDSR-lite clean-trained degraded input](<sr_benchmark_results/images/EDSR-lite_(clean_trained)/degraded_comparison.png>)
+
+#### EDSR-lite (robust trained)
+
+Clean LR input (LR → SR → HR)
+
+![EDSR-lite robust-trained clean input](<sr_benchmark_results/images/EDSR-lite_(robust_trained)/robust_clean_comparison.png>)
+
+Degraded LR input (noisy/JPEG LR → SR → HR)
+
+![EDSR-lite robust-trained degraded input](<sr_benchmark_results/images/EDSR-lite_(robust_trained)/robust_degraded_comparison.png>)
+
+## Notes
+
+- Dataset is cached under `data/` after first run.
+- Model metadata is tracked in:
+    - `models/model_registry.json` (denoising)
+    - `models/sr_model_registry.json` (super-resolution)
