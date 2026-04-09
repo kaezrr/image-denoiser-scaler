@@ -28,6 +28,7 @@ Usage
 """
 
 import argparse
+import json
 import os
 import sys
 
@@ -43,9 +44,10 @@ from model_sr import build_sr_model, SubPixelConv2D, combined_loss, PSNRMetric, 
 from noise_sr import RobustSRSequence, random_degrade
 from visualize import show_sr_results
 
-_BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
-MODELS_DIR  = os.path.join(_BASE_DIR, "models")
-RESULTS_DIR = os.path.join(_BASE_DIR, "Results")
+_BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
+MODELS_DIR   = os.path.join(_BASE_DIR, "models")
+RESULTS_DIR  = os.path.join(_BASE_DIR, "Results")
+HISTORY_DIR  = os.path.join(_BASE_DIR, "history")
 
 
 def _degrade_batch(data: np.ndarray) -> np.ndarray:
@@ -67,11 +69,13 @@ def main() -> None:
                         help="Number of residual blocks (default: 8)")
     args = parser.parse_args()
 
-    MODEL_PATH   = os.path.join(MODELS_DIR,  f"{args.name}.keras")
-    RESULTS_PATH = os.path.join(RESULTS_DIR, f"{args.name}_results.png")
+    MODEL_PATH    = os.path.join(MODELS_DIR,  f"{args.name}.keras")
+    RESULTS_PATH  = os.path.join(RESULTS_DIR, f"{args.name}_results.png")
+    HISTORY_PATH  = os.path.join(HISTORY_DIR, f"{args.name}_history.json")
 
     os.makedirs(MODELS_DIR,  exist_ok=True)
     os.makedirs(RESULTS_DIR, exist_ok=True)
+    os.makedirs(HISTORY_DIR, exist_ok=True)
 
     need_training = args.train or (not args.demo and not os.path.exists(MODEL_PATH))
 
@@ -149,7 +153,7 @@ def main() -> None:
             ),
         ]
 
-        model.fit(
+        hist = model.fit(
             train_gen,
             validation_data=val_gen,
             epochs=50,
@@ -158,6 +162,17 @@ def main() -> None:
 
         model.save(MODEL_PATH)
         print(f"\n[train] Model saved → {MODEL_PATH}")
+
+        # Save full training history so plots.py can read it later
+        history_payload = {
+            "model_name": args.name,
+            "num_res_blocks": args.blocks,
+            "history": {k: [float(v) for v in vals]
+                        for k, vals in hist.history.items()},
+        }
+        with open(HISTORY_PATH, "w") as f:
+            json.dump(history_payload, f, indent=2)
+        print(f"[train] History saved → {HISTORY_PATH}")
 
     else:
         # --------------------------------------------------------------
@@ -194,6 +209,18 @@ def main() -> None:
     for name, c, d in zip(metric_names, results_clean, results_degraded):
         print(f"  │ {name:<23}  │ {c:>12.4f}   │ {d:>13.4f}   │")
     print(  "  └─────────────────────────┴────────────────┴─────────────────┘")
+
+    # Append eval results to history file if it exists
+    if os.path.exists(HISTORY_PATH):
+        with open(HISTORY_PATH) as f:
+            payload = json.load(f)
+        payload["eval"] = {
+            "clean":    dict(zip(metric_names, [float(v) for v in results_clean])),
+            "degraded": dict(zip(metric_names, [float(v) for v in results_degraded])),
+        }
+        with open(HISTORY_PATH, "w") as f:
+            json.dump(payload, f, indent=2)
+        print(f"[train] Eval results appended → {HISTORY_PATH}")
 
     # ------------------------------------------------------------------
     # 6. Visualize — show clean and degraded side by side

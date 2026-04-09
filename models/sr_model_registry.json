@@ -1,0 +1,16 @@
+{
+  "models": [
+    {
+      "name": "EDSR-lite (clean trained)",
+      "model_path": "models/sr_edsr_model.keras",
+      "train_time": "\u2014",
+      "description": "Baseline \u2014 trained on clean bicubic LR only."
+    },
+    {
+      "name": "EDSR-lite (robust trained)",
+      "model_path": "models/sr_robust_model.keras",
+      "train_time": "\u2014",
+      "description": "Trained with random noise + JPEG + augmentation."
+    }
+  ]
+}
