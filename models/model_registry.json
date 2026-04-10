@@ -1,0 +1,16 @@
+{
+  "models": [
+    {
+      "name": "Simple Denoiser",
+      "model_path": "models/simple_denoiser.keras",
+      "train_time": "3 min (50 epochs, batch 32)",
+      "description": "Baseline encoder-decoder. Conv2D(64) → MaxPool → BN → Conv2D(32) → MaxPool → BN → decoder."
+    },
+    {
+      "name": "Inception-ResNet",
+      "model_path": "models/inception_resnet.keras",
+      "train_time": "21 min (50 epochs, batch 8, early stop)",
+      "description": "Hybrid Inception + ResNet blocks with U-Net skip connections. Mixed float16 precision."
+    }
+  ]
+}

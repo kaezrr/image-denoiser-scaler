@@ -18,6 +18,9 @@ def plot_rgb_img(image: np.ndarray):
         Image converted to RGB colour space.
     """
     img = image.copy()
+    # Cast float16 (from mixed precision) to float32 before any cv2 ops
+    if img.dtype == np.float16:
+        img = img.astype(np.float32)
     # If the image is float and in [0,1], scale to [0,255] uint8 for cvtColor
     if img.dtype in (np.float32, np.float64):
         img = np.clip(img * 255, 0, 255).astype(np.uint8)
